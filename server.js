@@ -98,8 +98,8 @@ const terminalSession = {
   cols: 120,
   rows: 32,
 };
-const AVATAR_IMAGE_PATH = '/root/.hermes/image_cache/img_04f694d2db87.jpg';
-const DEFAULT_AVATAR_FALLBACK = '/root/.hermes/image_cache/img_04f694d2db87.jpg';
+const AVATAR_IMAGE_PATH = path.join(CONTROL_STATE_DIR, 'default-avatar.jpg');
+const DEFAULT_AVATAR_FALLBACK = AVATAR_IMAGE_PATH;
 let avatarDataUrlCache = null;
 
 function ensureControlStateDir() {
@@ -263,7 +263,7 @@ function ensureTerminalSession() {
     LOGNAME: 'root',
     SHELL: '/bin/bash',
     TERM: 'xterm-256color',
-    HERMES_HOME: '/root/.hermes',
+    HERMES_HOME: CONTROL_HOME,
     HISTFILE: '/dev/null',
     PROMPT_COMMAND: '',
     PS1: terminalSession.prompt,
@@ -652,7 +652,7 @@ function buildUsageSummary() {
 }
 
 function extractConfigSummary() {
-  const configPath = '/root/.hermes/config.yaml';
+  const configPath = path.join(CONTROL_HOME, 'config.yaml');
   let raw = '';
   try {
     raw = fs.readFileSync(configPath, 'utf8');
@@ -665,7 +665,10 @@ function extractConfigSummary() {
 }
 
 function getSkills() {
-  const roots = ['/root/.hermes/skills', '/root/.hermes/hermes-agent/skills'];
+  const roots = [
+    path.join(CONTROL_HOME, 'skills'),
+    path.join(CONTROL_HOME, 'hermes-agent', 'skills'),
+  ];
   const skills = new Set();
   for (const root of roots) {
     try {
@@ -782,7 +785,7 @@ function runShell(command) {
       LOGNAME: 'root',
       SHELL: '/bin/bash',
       TERM: 'xterm-256color',
-      HERMES_HOME: '/root/.hermes',
+      HERMES_HOME: CONTROL_HOME,
       PATH: process.env.PATH,
     };
     const child = exec(command, {
