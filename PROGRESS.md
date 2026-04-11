@@ -4,10 +4,10 @@ Branch: `revamp/v2`
 Last updated: 2026-04-12 by david
 
 ## Phase 1: Foundation
-- [ ] Module 1.1: Project setup (Vite + vanilla JS init) ← NEXT
-- [ ] Module 1.2: Theme system (dark/light CSS + toggle)
-- [ ] Module 1.3: Layout skeleton (nav + content area)
-- [ ] Module 1.4: Login page + auth backend
+- [x] Module 1.1: Project setup (Vite + vanilla JS init)
+- [x] Module 1.2: Theme system (dark/light CSS + toggle)
+- [x] Module 1.3: Layout skeleton (nav + content area)
+- [ ] Module 1.4: Login page + auth backend ← NEXT
 - [ ] Module 1.5: User Menu + notifications shell
 
 ## Phase 2: Core Pages

@@ -8,7 +8,10 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "serve": "node server.js",
     "setup": "bash install.sh",
     "test": "node --test",
     "reset-password": "node scripts/reset-password.js"
@@ -24,5 +27,8 @@
     "ws": "^8.18.0",
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0"
+  },
+  "devDependencies": {
+    "vite": "^8.0.8"
   }
 }

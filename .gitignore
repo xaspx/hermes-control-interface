@@ -5,3 +5,4 @@ npm-debug.log*
 .DS_Store
 .control-interface/
 hermes_conversation_*.json
+dist/

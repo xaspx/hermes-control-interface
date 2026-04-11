@@ -90,7 +90,7 @@ app.use(helmet({
 }));
 
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'website')));
+app.use(express.static(path.join(__dirname, 'dist')));
 app.use('/vendor/xterm', express.static(path.join(__dirname, 'node_modules/xterm')));
 app.use('/vendor/xterm-addon-fit', express.static(path.join(__dirname, 'node_modules/xterm-addon-fit')));
 

@@ -1,0 +1,117 @@
+/* ============================================
+   HCI Theme System — Dark + Light
+   Source: hermes-agent.nousresearch.com
+   ============================================ */
+
+:root {
+  /* Dark Mode (default) */
+  --bg: #170d02;
+  --bg-base: #170d02;
+  --bg-panel: rgba(255, 172, 2, 0.06);
+  --bg-panel-hover: rgba(255, 172, 2, 0.10);
+  --bg-input: rgba(255, 172, 2, 0.04);
+
+  --fg: #ffac02;
+  --fg-base: #fff;
+  --fg-muted: color-mix(in oklab, #ffac02 60%, transparent);
+  --fg-subtle: color-mix(in oklab, #ffac02 40%, transparent);
+
+  --border: color-mix(in oklab, #ffac02 15%, transparent);
+  --border-strong: color-mix(in oklab, #ffac02 25%, transparent);
+
+  --green: #67f0a2;
+  --blue: #6aa9ff;
+  --red: #fb2c36;
+  --amber: #ffb347;
+  --yellow: #ffff89;
+
+  --shadow: 0 20px 70px rgba(0, 0, 0, 0.5);
+  --radius: 8px;
+  --radius-lg: 16px;
+  --font: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Transitions */
+  --transition: 0.2s ease;
+}
+
+/* Light Mode */
+[data-theme="light"] {
+  --bg: #f5f0e8;
+  --bg-base: #f5f0e8;
+  --bg-panel: rgba(23, 13, 2, 0.04);
+  --bg-panel-hover: rgba(23, 13, 2, 0.08);
+  --bg-input: rgba(23, 13, 2, 0.06);
+
+  --fg: #170d02;
+  --fg-base: #170d02;
+  --fg-muted: color-mix(in oklab, #170d02 60%, transparent);
+  --fg-subtle: color-mix(in oklab, #170d02 40%, transparent);
+
+  --border: color-mix(in oklab, #170d02 15%, transparent);
+  --border-strong: color-mix(in oklab, #170d02 25%, transparent);
+
+  --shadow: 0 20px 70px rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================
+   Base Reset
+   ============================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, color-mix(in oklab, #ffac02 8%, transparent) 0%, transparent 35%),
+    radial-gradient(circle at bottom right, color-mix(in oklab, #6aa9ff 6%, transparent) 0%, transparent 32%),
+    linear-gradient(180deg, var(--bg-base) 0%, color-mix(in oklab, var(--bg-base) 80%, #000) 100%);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+/* ============================================
+   Scrollbar
+   ============================================ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* ============================================
+   Selection
+   ============================================ */
+::selection {
+  background: color-mix(in oklab, #ffac02 30%, transparent);
+  color: var(--fg-base);
+}
+
+/* ============================================
+   Links
+   ============================================ */
+a {
+  color: var(--fg);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+a:hover {
+  color: var(--yellow);
+}
