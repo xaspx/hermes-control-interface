@@ -152,8 +152,28 @@
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
+}
+
+/* Search input */
+.search-input {
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 12px;
+  outline: none;
+  width: 200px;
+  transition: border-color var(--transition);
+}
+.search-input:focus {
+  border-color: var(--fg);
+}
+.search-input::placeholder {
+  color: var(--fg-subtle);
 }
 
 /* Status Pills */

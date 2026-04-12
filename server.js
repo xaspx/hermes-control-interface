@@ -83,7 +83,7 @@ app.use(helmet({
       scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:", "blob:"],
+      imgSrc: ["'self'", "data:", "blob:", "https://portal.nousresearch.com"],
       connectSrc: ["'self'", "ws:", "wss:"],
     },
   },
@@ -2022,7 +2022,7 @@ app.delete('/api/sessions/:id', requireCsrf, async (req, res) => {
   try {
     const sessionId = sanitizeSessionId(req.params.id);
     if (!sessionId) return res.status(400).json({ ok: false, error: 'invalid session id' });
-    const output = await shell(`hermes sessions delete ${sessionId} 2>&1`);
+    const output = await shell(`hermes sessions delete --yes ${sessionId} 2>&1`);
     audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'SESSION_DELETE', req.params.id);
     addNotification('info', `Session deleted: ${sessionId.slice(0, 12)}…`);
     res.json({ ok: true, output });

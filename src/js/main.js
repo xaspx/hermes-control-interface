@@ -1209,11 +1209,30 @@ async function loadUsage(container) {
     // Fetch usage data
     await fetchUsageData();
 
+    // Bind filter change → auto-refresh
+    ['usage-days', 'usage-agent'].forEach(id => {
+      document.getElementById(id)?.addEventListener('change', fetchUsageData);
+    });
+
     // Bind refresh button (NOT filter change events)
     document.querySelector('#usage-overview + div .btn, #usage-overview ~ div .btn, #usage-tools + div .btn, [onclick*="loadUsage"]')?.addEventListener('click', (e) => {
       e.preventDefault();
       fetchUsageData();
     });
+
+    // Add reset button
+    const btnDiv = document.querySelector('#usage-days')?.parentElement;
+    if (btnDiv) {
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'btn btn-ghost';
+      resetBtn.textContent = '⟳ Reset';
+      resetBtn.onclick = () => {
+        document.getElementById('usage-days').value = '7';
+        document.getElementById('usage-agent').value = '';
+        fetchUsageData();
+      };
+      btnDiv.appendChild(resetBtn);
+    }
 
   } catch (e) {
     document.getElementById('usage-overview').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
@@ -1290,7 +1309,7 @@ async function loadSkills(container) {
         <div class="page-subtitle">Browse and manage installed skills</div>
       </div>
       <div style="display:flex;gap:8px;">
-        <input type="text" id="skills-search" placeholder="Search skills..." style="width:200px;" />
+        <input type="text" id="skills-search" class="search-input" placeholder="Search skills..." />
         <button class="btn btn-ghost" onclick="loadSkills(document.querySelector('.page.active'))">↻ Refresh</button>
       </div>
     </div>
