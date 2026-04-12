@@ -385,6 +385,7 @@ async function loadAgents(container) {
             <div class="card-actions">
               <button class="btn btn-ghost btn-sm" onclick="navigate('agent-detail', {name:'${p.name}'})">Open</button>
               ${!p.active ? `<button class="btn btn-ghost btn-sm" onclick="setAgentDefault('${p.name}')">Set Default</button>` : ''}
+              ${p.name !== 'default' ? `<button class="btn btn-ghost btn-sm btn-danger" onclick="deleteAgent('${p.name}')">Delete</button>` : ''}
             </div>
           </div>
         `;
@@ -394,6 +395,25 @@ async function loadAgents(container) {
     }
   } catch (e) {
     document.getElementById('agents-grid').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+  }
+}
+
+async function deleteAgent(name) {
+  if (!await customConfirm(`Delete agent "${name}"? This cannot be undone.`, 'Delete Agent')) return;
+  try {
+    const csrfToken = state.csrfToken || '';
+    const res = await api(`/api/profiles/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken },
+    });
+    if (res.ok) {
+      showToast(`Agent ${name} deleted`, 'success');
+      loadAgents(document.querySelector('.page.active'));
+    } else {
+      await customAlert(res.error || 'Failed to delete', 'Error');
+    }
+  } catch (e) {
+    await customAlert(e.message, 'Error');
   }
 }
 
@@ -693,10 +713,10 @@ async function loadXtermAndConnect(command) {
       fontSize: 13,
       fontFamily: "'JetBrains Mono', monospace",
       theme: {
-        background: '#000000',
-        foreground: '#ffe6cb',
-        cursor: '#ffe6cb',
-        selectionBackground: 'rgba(255, 230, 203, 0.3)',
+        background: '#062e27',
+        foreground: '#e8f5f0',
+        cursor: '#67f0a2',
+        selectionBackground: 'rgba(103, 240, 162, 0.3)',
       },
     });
 
@@ -706,16 +726,22 @@ async function loadXtermAndConnect(command) {
     fitAddon.fit();
 
     // Connect WebSocket
-    const ws = new WebSocket(`wss://${location.host}/ws`);
+    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
     ws.onopen = () => {
-      // Send command
-      ws.send(JSON.stringify({ type: 'input', data: command + '\r' }));
+      // Wait for terminal to be ready, then send command
+      setTimeout(() => {
+        ws.send(JSON.stringify({ type: 'terminal-input', data: command + '\r' }));
+      }, 500);
     };
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'terminal-output' && msg.chunk) {
           term.write(msg.chunk);
+        }
+        if (msg.type === 'terminal-transcript' && msg.buffer) {
+          term.write(msg.buffer);
         }
       } catch {}
     };
@@ -725,14 +751,26 @@ async function loadXtermAndConnect(command) {
 
     // Send user input
     term.onData((data) => {
-      ws.send(JSON.stringify({ type: 'input', data }));
+      ws.send(JSON.stringify({ type: 'terminal-input', data }));
     });
 
     // Resize
-    window.addEventListener('resize', () => {
+    const resizeHandler = () => {
       fitAddon.fit();
-      ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      ws.send(JSON.stringify({ type: 'terminal-resize', cols: term.cols, rows: term.rows }));
+    };
+    window.addEventListener('resize', resizeHandler);
+
+    // Cleanup on panel close
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector('.terminal-panel')) {
+        ws.close();
+        window.removeEventListener('resize', resizeHandler);
+        observer.disconnect();
+        document.getElementById('main').style.bottom = '0';
+      }
     });
+    observer.observe(document.body, { childList: true });
 
   } catch (e) {
     bodyEl.innerHTML = `<div style="color:var(--red);padding:20px;">Failed to load terminal: ${e.message}</div>`;
@@ -1310,8 +1348,11 @@ async function loadUsers() {
     if (res.ok && res.users) {
       el.innerHTML = res.users.map(u => `
         <div class="stat-row">
-          <span class="stat-label">${u.username}</span>
-          <span class="stat-value">${u.role} ${u.last_login ? '· last: ' + new Date(u.last_login).toLocaleDateString() : ''}</span>
+          <span class="stat-label">${u.username} <span class="badge">${u.role}</span></span>
+          <span class="stat-value">
+            ${u.last_login ? new Date(u.last_login).toLocaleDateString() : 'never'}
+            ${res.users.length > 1 ? `<button class="btn btn-ghost btn-sm btn-danger" onclick="deleteUser('${u.username}')" style="margin-left:8px;">×</button>` : ''}
+          </span>
         </div>
       `).join('');
     } else {
@@ -1319,6 +1360,25 @@ async function loadUsers() {
     }
   } catch (e) {
     document.getElementById('users-list').innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
+}
+
+async function deleteUser(username) {
+  if (!await customConfirm(`Delete user "${username}"?`, 'Delete User')) return;
+  try {
+    const csrfToken = state.csrfToken || '';
+    const res = await api(`/api/users/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken },
+    });
+    if (res.ok) {
+      showToast(`User ${username} deleted`, 'success');
+      loadUsers();
+    } else {
+      await customAlert(res.error || 'Failed', 'Error');
+    }
+  } catch (e) {
+    await customAlert(e.message, 'Error');
   }
 }
 
@@ -1814,6 +1874,8 @@ Object.assign(window, {
   showCreateAgent,
   showCreateUser,
   createUser,
+  deleteUser,
+  deleteAgent,
   loadUsers,
   loadAuth,
   loadAudit,

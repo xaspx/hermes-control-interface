@@ -1749,7 +1749,7 @@ app.get('/api/memory/:profile', requireAuth, async (req, res) => {
 app.post('/api/doctor', requireRole('admin'), async (req, res) => {
   try {
     const fix = req.body.fix ? '--fix' : '';
-    const output = await shell(`hermes doctor ${fix} 2>&1`, { timeout: 120 });
+    const output = await shell(`hermes doctor ${fix} 2>&1`, '120s');
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, output: e.message });
@@ -1759,7 +1759,7 @@ app.post('/api/doctor', requireRole('admin'), async (req, res) => {
 // Dump
 app.get('/api/dump', requireRole('admin'), async (req, res) => {
   try {
-    const output = await shell('hermes dump --show-keys 2>&1', { timeout: 60 });
+    const output = await shell('hermes dump --show-keys 2>&1', '60s');
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, output: e.message });
@@ -1769,7 +1769,7 @@ app.get('/api/dump', requireRole('admin'), async (req, res) => {
 // Update
 app.post('/api/update', requireRole('admin'), async (req, res) => {
   try {
-    const output = await shell('hermes update 2>&1', { timeout: 300 });
+    const output = await shell('hermes update 2>&1', '300s');
     audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'HERMES_UPDATE', 'started');
     res.json({ ok: true, output });
   } catch (e) {
@@ -1908,6 +1908,10 @@ app.post('/api/profiles/create', requireRole('admin'), async (req, res) => {
     const output = await shell(`${cmd} 2>&1`);
     audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'PROFILE_CREATE', safeName);
     addNotification('success', `Profile created: ${safeName}`);
+    // Auto-install gateway service
+    try {
+      await shell(`bash /root/projects/hci-staging/scripts/setup-gateway-service.sh --profile ${safeName} --user root --force 2>&1`, '30s');
+    } catch {}
     // Invalidate cache
     getProfiles.cache = { at: 0, data: [] };
     res.json({ ok: true, output });

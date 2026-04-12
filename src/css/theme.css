@@ -4,20 +4,20 @@
    ============================================ */
 
 :root {
-  /* Dark Mode (default) — matches website exactly */
-  --bg: #000000;
-  --bg-base: #000000;
-  --bg-panel: rgba(255, 230, 203, 0.06);
-  --bg-panel-hover: rgba(255, 230, 203, 0.10);
-  --bg-input: rgba(255, 230, 203, 0.04);
+  /* Dark Mode (default) — deep teal green */
+  --bg: #0a453c;
+  --bg-base: #0a453c;
+  --bg-panel: rgba(255, 255, 255, 0.06);
+  --bg-panel-hover: rgba(255, 255, 255, 0.10);
+  --bg-input: rgba(255, 255, 255, 0.05);
 
-  --fg: #ffe6cb;
-  --fg-base: #ffe6cb;
-  --fg-muted: rgba(255, 230, 203, 0.55);
-  --fg-subtle: rgba(255, 230, 203, 0.35);
+  --fg: #e8f5f0;
+  --fg-base: #ffffff;
+  --fg-muted: rgba(232, 245, 240, 0.55);
+  --fg-subtle: rgba(232, 245, 240, 0.35);
 
-  --border: rgba(255, 230, 203, 0.15);
-  --border-strong: rgba(255, 230, 203, 0.25);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.22);
 
   --green: #67f0a2;
   --blue: #6aa9ff;
@@ -25,7 +25,7 @@
   --amber: #ffb347;
   --yellow: #ffff89;
 
-  --shadow: 0 20px 70px rgba(0, 0, 0, 0.6);
+  --shadow: 0 20px 70px rgba(0, 0, 0, 0.5);
   --radius: 8px;
   --radius-lg: 16px;
   --font: 'JetBrains Mono', ui-monospace, monospace;
@@ -34,19 +34,19 @@
 
 /* Light Mode */
 [data-theme="light"] {
-  --bg: #f5f0e8;
-  --bg-base: #f5f0e8;
-  --bg-panel: rgba(0, 0, 0, 0.04);
-  --bg-panel-hover: rgba(0, 0, 0, 0.08);
-  --bg-input: rgba(0, 0, 0, 0.06);
+  --bg: #e8f5f0;
+  --bg-base: #e8f5f0;
+  --bg-panel: rgba(10, 69, 60, 0.06);
+  --bg-panel-hover: rgba(10, 69, 60, 0.10);
+  --bg-input: rgba(10, 69, 60, 0.05);
 
-  --fg: #170d02;
-  --fg-base: #170d02;
-  --fg-muted: rgba(23, 13, 2, 0.55);
-  --fg-subtle: rgba(23, 13, 2, 0.35);
+  --fg: #0a453c;
+  --fg-base: #0a453c;
+  --fg-muted: rgba(10, 69, 60, 0.55);
+  --fg-subtle: rgba(10, 69, 60, 0.35);
 
-  --border: rgba(23, 13, 2, 0.15);
-  --border-strong: rgba(23, 13, 2, 0.25);
+  --border: rgba(10, 69, 60, 0.12);
+  --border-strong: rgba(10, 69, 60, 0.22);
 
   --shadow: 0 20px 70px rgba(0, 0, 0, 0.1);
 }
@@ -66,8 +66,8 @@ html, body {
 
 body {
   background:
-    radial-gradient(ellipse at 0% 0%, rgba(255, 230, 203, 0.05) 0%, transparent 50%),
-    radial-gradient(ellipse at 100% 100%, rgba(106, 169, 255, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 0% 0%, rgba(103, 240, 162, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 100% 100%, rgba(106, 169, 255, 0.04) 0%, transparent 50%),
     var(--bg-base);
   color: var(--fg);
   font-family: var(--font);
@@ -83,8 +83,8 @@ body::before {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(255, 230, 203, 0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 230, 203, 0.015) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
   background-size: 40px 40px;
   mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
   opacity: 0.4;
@@ -92,15 +92,15 @@ body::before {
 
 [data-theme="light"] body {
   background:
-    radial-gradient(ellipse at 0% 0%, rgba(23, 13, 2, 0.03) 0%, transparent 50%),
-    radial-gradient(ellipse at 100% 100%, rgba(23, 13, 2, 0.02) 0%, transparent 50%),
+    radial-gradient(ellipse at 0% 0%, rgba(10, 69, 60, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 100% 100%, rgba(10, 69, 60, 0.03) 0%, transparent 50%),
     var(--bg-base);
 }
 
 [data-theme="light"] body::before {
   background-image:
-    linear-gradient(rgba(23, 13, 2, 0.01) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(23, 13, 2, 0.01) 1px, transparent 1px);
+    linear-gradient(rgba(10, 69, 60, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(10, 69, 60, 0.015) 1px, transparent 1px);
 }
 
 /* ============================================
@@ -125,7 +125,7 @@ body::before {
    Selection
    ============================================ */
 ::selection {
-  background: rgba(255, 230, 203, 0.25);
+  background: rgba(103, 240, 162, 0.3);
   color: var(--fg-base);
 }
 
