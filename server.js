@@ -1536,13 +1536,17 @@ app.get('/api/explorer', requireAuth, (req, res) => {
 app.get('/api/file', requireAuth, (req, res) => {
   const requested = String(req.query.path || '');
   if (!requested) return res.status(400).json({ error: 'path required' });
+  const rel = requested.replace(/^\/+/, '');
+  const abs = path.resolve(CONTROL_HOME, rel);
+  console.log('[FILE-READ]', { requested, rel, abs, home: CONTROL_HOME, exists: fs.existsSync(abs), allowed: abs.startsWith(CONTROL_HOME) });
   try {
     const content = readFileSafe(requested);
-    return res.json({ path: path.resolve(CONTROL_HOME, requested.replace(/^\/+/, '')), content });
+    return res.json({ ok: true, path: abs, content });
   } catch (error) {
     const message = error.message || 'file read failed';
+    console.log('[FILE-READ-ERROR]', message);
     const status = message.includes('EISDIR') ? 400 : message.includes('not found') ? 404 : 400;
-    return res.status(status).json({ error: message, path: requested });
+    return res.status(status).json({ error: message, path: requested, resolved: abs });
   }
 });
 
