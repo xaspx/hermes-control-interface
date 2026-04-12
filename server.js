@@ -1997,7 +1997,8 @@ app.post('/api/sessions/:id/rename', requireCsrf, async (req, res) => {
     if (!title) return res.status(400).json({ ok: false, error: 'invalid title (allowed: a-z, A-Z, 0-9, spaces, basic punctuation)' });
     const profile = req.body?.profile || '';
     const profileFlag = profile ? `-p ${sanitizeProfileName(profile)} ` : '';
-    const output = await shell(`hermes ${profileFlag}sessions rename ${sessionId} \\\"${title.replace(/\"/g, '\\\\\"')}\\\" 2>&1`);
+    const safeTitle = title.replace(/[^a-zA-Z0-9 _\-\.]/g, '');
+    const output = await shell(`hermes ${profileFlag}sessions rename ${sessionId} "${safeTitle}" 2>&1`);
     audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'SESSION_RENAME', `${req.params.id} → ${title}`);
     addNotification('info', `Session renamed: ${sessionId.slice(0, 12)}… → ${title}`);
     res.json({ ok: true, output });

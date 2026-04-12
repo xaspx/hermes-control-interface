@@ -2162,7 +2162,7 @@ async function loadFileContent(filePath) {
       textEl.textContent = res.content || '(empty file)';
       document.querySelector('#file-content .card-title').textContent = `File: ${filePath}`;
     } else {
-      textEl.textContent = `Error: ${res.error || 'Could not read file'}`;
+      textEl.textContent = `Error: ${res.error || 'Could not read file'} (path: ${filePath})`;
     }
   } catch (e) {
     textEl.textContent = `Error: ${e.message}`;
