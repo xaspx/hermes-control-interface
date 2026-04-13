@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hermes Control Interface</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/theme.css" />
+  <link rel="stylesheet" href="/css/layout.css" />
+  <link rel="stylesheet" href="/css/components.css" />
+</head>
+<body>
+  <!-- Login Overlay (shown before auth) -->
+  <div id="login-overlay" class="overlay">
+    <div class="login-card">
+      <div class="login-brand">Hermes Control Interface</div>
+      <div class="login-sub" id="login-sub">Enter credentials to continue</div>
+      <form id="login-form" class="login-form">
+        <input id="login-username" type="text" placeholder="Username" autocomplete="username" />
+        <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" />
+        <button type="submit" class="btn btn-primary">unlock</button>
+      </form>
+      <!-- First-run: Create Admin -->
+      <form id="setup-form" class="login-form" style="display:none;">
+        <div class="login-sub">First run — create admin account</div>
+        <input id="setup-username" type="text" placeholder="Username" autocomplete="username" />
+        <input id="setup-password" type="password" placeholder="Password (min 8 chars)" autocomplete="new-password" />
+        <input id="setup-password-confirm" type="password" placeholder="Confirm password" autocomplete="new-password" />
+        <button type="submit" class="btn btn-primary">create admin</button>
+      </form>
+      <div id="login-error" class="login-error"></div>
+    </div>
+  </div>
+
+  <!-- Main App (hidden until auth) -->
+  <div id="app" style="display:none;">
+    <!-- Top Nav -->
+    <header id="topbar">
+      <div class="topbar-left">
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu">☰</button>
+        <img src="/assets/hermes-icon.svg" alt="Hermes" class="brand-logo" />
+        <div class="brand-sub">Hermes Control Interface</div>
+      </div>
+      <nav class="topbar-nav" id="nav">
+        <a href="#home" class="nav-link active" data-page="home">Home</a>
+        <a href="#agents" class="nav-link" data-page="agents">Agents</a>
+        <a href="#usage" class="nav-link" data-page="usage">Usage</a>
+        <a href="#skills" class="nav-link" data-page="skills">Skills</a>
+<a href="#maintenance" class="nav-link" data-page="maintenance">Maintenance</a>
+<a href="#files" class="nav-link" data-page="files">Files</a>
+</nav>
+      <div class="topbar-right">
+        <button class="icon-btn" id="notif-btn" title="Notifications">
+          <span class="notif-icon">🔔</span>
+          <span class="notif-badge" id="notif-badge" style="display:none;">0</span>
+        </button>
+        <button class="icon-btn" id="theme-toggle" title="Toggle theme">
+          <span id="theme-icon">🌙</span>
+        </button>
+        <div class="user-menu" id="user-menu">
+          <button class="user-btn" id="user-btn">
+            <span id="user-name">admin</span>
+            <span class="user-role" id="user-role">admin</span>
+          </button>
+          <div class="user-dropdown" id="user-dropdown" style="display:none;">
+            <button class="dropdown-item" id="change-password-btn">Change Password</button>
+            <button class="dropdown-item" id="logout-btn">Logout</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Notification Dropdown -->
+    <div id="notif-dropdown" class="notif-dropdown" style="display:none;">
+      <div class="notif-header">
+        <span>Notifications</span>
+        <button class="btn-link" id="notif-clear">Clear all</button>
+      </div>
+      <div id="notif-list" class="notif-list">
+        <div class="notif-empty">No notifications</div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <main id="main">
+      <!-- Pages (shown/hidden based on nav) -->
+      <div id="page-home" class="page active"></div>
+      <div id="page-agents" class="page"></div>
+      <div id="page-agent-detail" class="page"></div>
+      <div id="page-usage" class="page"></div>
+      <div id="page-skills" class="page"></div>
+      <div id="page-maintenance" class="page"></div>
+      <div id="page-files" class="page"></div>
+    </main>
+  </div>
+
+  <!-- Change Password Modal -->
+  <div id="password-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-title">Change Password</div>
+      <form id="password-form">
+        <input id="current-password" type="password" placeholder="Current password" autocomplete="current-password" />
+        <input id="new-password" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password" />
+        <input id="confirm-new-password" type="password" placeholder="Confirm new password" autocomplete="new-password" />
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="password-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Update</button>
+        </div>
+      </form>
+      <div id="password-error" class="login-error"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

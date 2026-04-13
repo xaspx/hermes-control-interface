@@ -25,9 +25,11 @@
   </div>
 
   <div id="bg-grid"></div>
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
   <header id="topbar">
     <div class="topbar-left">
+      <button id="sidebar-toggle-btn" class="ghost-btn sidebar-toggle" type="button" aria-label="Toggle sidebar">☰</button>
       <div class="brand">Hermes Control Interface</div>
       <div class="subtitle">embedded Hermes CLI • root@hermes</div>
     </div>
@@ -37,6 +39,16 @@
       <span id="clock">--:--:--</span>
       <button class="ghost-btn" id="refresh-btn">refresh</button>
       <button class="ghost-btn active" id="auto-refresh-btn">auto</button>
+      <div class="alert-bell-wrap">
+        <button class="ghost-btn" id="alert-bell-btn">🔔<span id="alert-badge" class="alert-badge hidden">0</span></button>
+        <div id="alert-dropdown" class="alert-dropdown hidden">
+          <div class="alert-dropdown-head">
+            <span>Alerts</span>
+            <button class="ghost-btn" id="alert-clear-btn">clear all</button>
+          </div>
+          <div id="alert-list" class="alert-list"><div class="alert-empty">No alerts</div></div>
+        </div>
+      </div>
       <button class="ghost-btn" id="layout-edit-btn">edit layout</button>
       <button class="ghost-btn" id="layout-save-btn" style="display:none;">save layout</button>
       <button class="ghost-btn" id="logout-btn">logout</button>
@@ -202,6 +214,6 @@
 
   <script src="/vendor/xterm/lib/xterm.js"></script>
   <script src="/vendor/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
-  <script type="module" src="/app.js?v=5"></script>
+  <script type="module" src="/app.js?v=6"></script>
 </body>
 </html>

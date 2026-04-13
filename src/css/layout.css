@@ -1,0 +1,491 @@
+/* ============================================
+   Layout — Topbar + Main + Pages
+   ============================================ */
+
+/* Topbar */
+#topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 56px;
+  background: color-mix(in oklab, var(--bg-base) 90%, transparent);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.brand {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg);
+}
+
+.brand-sub {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.brand-logo {
+  height: 28px;
+  width: auto;
+  filter: brightness(0) invert(1);
+  opacity: 0.85;
+}
+[data-theme="light"] .brand-logo {
+  filter: none;
+  opacity: 0.7;
+}
+
+.topbar-nav {
+  display: flex;
+  gap: 4px;
+}
+
+.nav-link {
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  transition: all var(--transition);
+}
+
+.nav-link:hover {
+  color: var(--fg);
+  background: var(--bg-panel-hover);
+}
+
+.nav-link.active {
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Main Content */
+#main {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+/* Pages */
+.page {
+  display: none;
+}
+
+.page.active {
+  display: block;
+}
+
+/* Login Overlay */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    color-mix(in oklab, var(--bg-base) 85%, transparent),
+    url('https://portal.nousresearch.com/hermes-agent-bg.jpg');
+  background-size: cover;
+  background-position: center;
+  backdrop-filter: blur(20px);
+}
+
+.overlay.hidden {
+  display: none;
+}
+
+.login-card {
+  width: 360px;
+  padding: 40px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.login-brand {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+  margin-bottom: 8px;
+}
+
+.login-sub {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-bottom: 24px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login-form input {
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.login-form input:focus {
+  border-color: var(--fg);
+}
+
+.login-form input::placeholder {
+  color: var(--fg-subtle);
+}
+
+.login-error {
+  font-size: 12px;
+  color: var(--red);
+  margin-top: 12px;
+  min-height: 18px;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+}
+
+.modal-card {
+  width: 400px;
+  padding: 32px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  color: var(--fg);
+}
+
+.modal-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-card input {
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 13px;
+  outline: none;
+}
+
+.modal-card input:focus {
+  border-color: var(--fg);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Notification Dropdown */
+.notif-dropdown {
+  position: fixed;
+  top: 56px;
+  right: 80px;
+  z-index: 200;
+  width: 360px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(16px);
+}
+
+.notif-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.notif-list {
+  padding: 8px;
+}
+
+.notif-empty {
+  padding: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+
+.notif-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.notif-item:hover {
+  background: var(--bg-panel-hover);
+}
+
+.notif-item.error .notif-type { color: var(--red); }
+.notif-item.warning .notif-type { color: var(--amber); }
+.notif-item.info .notif-type { color: var(--blue); }
+.notif-item.success .notif-type { color: var(--green); }
+
+.notif-type {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.notif-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notif-message {
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.notif-time {
+  font-size: 10px;
+  color: var(--fg-subtle);
+  margin-top: 2px;
+}
+
+/* User Dropdown */
+.user-menu {
+  position: relative;
+}
+
+.user-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.user-btn:hover {
+  background: var(--bg-panel-hover);
+}
+
+.user-role {
+  font-size: 10px;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+}
+
+.user-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 180px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.dropdown-item:hover {
+  background: var(--bg-panel-hover);
+}
+
+/* Card hover effect */
+.card {
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.card:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 20px rgba(124, 148, 92, 0.04);
+}
+
+/* Agent card clickable */
+.agent-card {
+  cursor: pointer;
+}
+.agent-card:hover {
+  border-color: var(--fg) !important;
+  box-shadow: 0 0 30px rgba(124, 148, 92, 0.08);
+}
+
+/* Notif dropdown */
+.notif-dropdown {
+  position: fixed;
+  top: 56px;
+  right: 20px;
+  z-index: 200;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-width: 300px;
+  max-height: 400px;
+  overflow-y: auto;
+  animation: slideDown 0.15s ease;
+}
+.notif-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+.notif-empty {
+  padding: 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Notif item colors */
+.notif-error { border-left: 3px solid var(--red); }
+.notif-warning { border-left: 3px solid var(--amber); }
+.notif-success { border-left: 3px solid var(--green); }
+.notif-info { border-left: 3px solid var(--blue); }
+
+/* Button hover glow */
+.btn-primary:hover {
+  box-shadow: 0 0 12px rgba(124, 148, 92, 0.2);
+}
+.btn-ghost:hover {
+  box-shadow: 0 0 8px rgba(124, 148, 92, 0.08);
+}
+
+/* Topbar glow on active */
+.topbar {
+  box-shadow: 0 1px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* Nav toggle (hamburger) */
+.nav-toggle {
+  display: none;
+  font-size: 18px;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  line-height: 1;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .nav-toggle { display: flex; }
+  .brand-sub { display: none; }
+  .topbar-nav {
+    display: none;
+    position: absolute;
+    top: 56px;
+    left: 0;
+    right: 0;
+    background: var(--bg-base);
+    border-bottom: 1px solid var(--border);
+    flex-direction: column;
+    padding: 8px;
+    z-index: 99;
+  }
+  .topbar-nav.mobile-open { display: flex; }
+  .nav-link { padding: 12px 16px; }
+  .topbar-right { gap: 4px; }
+  #main { padding: 16px; }
+  .notif-dropdown { right: 8px; left: 8px; width: auto; min-width: 0; }
+  .modal-card { width: auto; margin: 16px; }
+  .login-card { width: auto; margin: 16px; padding: 24px; }
+}
+
+@media (max-width: 480px) {
+  #topbar { padding: 0 10px; }
+  .brand { font-size: 14px; }
+  #main { padding: 12px; }
+  .user-role { display: none; }
+}

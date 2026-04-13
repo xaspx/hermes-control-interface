@@ -1,7 +1,10 @@
 node_modules/
 .env
+.env.*
 npm-debug.log*
 *.log
 .DS_Store
 .control-interface/
 hermes_conversation_*.json
+dist/
+website/

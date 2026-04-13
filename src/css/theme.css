@@ -1,0 +1,147 @@
+/* ============================================
+   HCI Theme — Custom Palette
+   ============================================ */
+
+:root {
+  /* Dark Mode */
+  --bg: #0b201f;
+  --bg-base: #0b201f;
+  --bg-panel: rgba(220, 203, 181, 0.06);
+  --bg-panel-hover: rgba(220, 203, 181, 0.10);
+  --bg-input: rgba(220, 203, 181, 0.05);
+  --bg-card: rgba(0, 0, 0, 0.2);
+
+  --fg: #dccbb5;
+  --fg-base: #dccbb5;
+  --fg-muted: rgba(220, 203, 181, 0.50);
+  --fg-subtle: rgba(220, 203, 181, 0.30);
+
+  --border: rgba(220, 203, 181, 0.10);
+  --border-strong: rgba(220, 203, 181, 0.20);
+
+  --accent: #7c945c;
+  --accent-dim: rgba(124, 148, 92, 0.15);
+  --green: #7c945c;
+  --blue: #6f9ac3;
+  --red: #c45c5c;
+  --amber: #c4a44c;
+  --yellow: #d4c47c;
+  --pink: #b07c9c;
+
+  --shadow: 0 20px 70px rgba(0, 0, 0, 0.4);
+  --radius: 8px;
+  --radius-lg: 16px;
+  --font: 'JetBrains Mono', ui-monospace, monospace;
+  --transition: 0.2s ease;
+}
+
+/* Light Mode */
+[data-theme="light"] {
+  --bg: #e4ebdf;
+  --bg-base: #e4ebdf;
+  --bg-panel: rgba(11, 32, 31, 0.05);
+  --bg-panel-hover: rgba(11, 32, 31, 0.08);
+  --bg-input: rgba(11, 32, 31, 0.04);
+  --bg-card: rgba(255, 255, 255, 0.5);
+
+  --fg: #0b201f;
+  --fg-base: #0b201f;
+  --fg-muted: rgba(11, 32, 31, 0.55);
+  --fg-subtle: rgba(11, 32, 31, 0.35);
+
+  --border: rgba(11, 32, 31, 0.12);
+  --border-strong: rgba(11, 32, 31, 0.22);
+
+  --accent: #2e6fb0;
+  --accent-dim: rgba(46, 111, 176, 0.10);
+  --green: #7c945c;
+  --blue: #2e6fb0;
+  --red: #b04c4c;
+  --amber: #b0944c;
+  --yellow: #9c9c5c;
+  --pink: #9c6c8c;
+
+  --shadow: 0 20px 70px rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================
+   Base Reset
+   ============================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 0% 0%, rgba(124, 148, 92, 0.08) 0%, transparent 40%),
+    radial-gradient(ellipse at 100% 100%, rgba(111, 154, 195, 0.06) 0%, transparent 40%),
+    linear-gradient(180deg, rgba(15,42,40,0.92) 0%, rgba(11,32,31,0.95) 30%, rgba(8,24,23,0.97) 100%),
+    url('https://portal.nousresearch.com/hermes-agent-bg.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow: hidden;
+}
+
+/* Grid overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(124, 148, 92, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 148, 92, 0.015) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(circle at center, black 30%, transparent 70%);
+  opacity: 0.5;
+}
+
+[data-theme="light"] body {
+  background:
+    radial-gradient(ellipse at 0% 0%, rgba(46, 111, 176, 0.04) 0%, transparent 40%),
+    radial-gradient(ellipse at 100% 100%, rgba(124, 148, 92, 0.03) 0%, transparent 40%),
+    linear-gradient(180deg, rgba(232,239,227,0.95) 0%, rgba(228,235,223,0.96) 30%, rgba(220,231,215,0.97) 100%),
+    url('https://portal.nousresearch.com/hermes-agent-bg.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+[data-theme="light"] body::before {
+  background-image:
+    linear-gradient(rgba(11, 32, 31, 0.01) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(11, 32, 31, 0.01) 1px, transparent 1px);
+}
+
+/* ============================================
+   Scrollbar
+   ============================================ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ============================================
+   Selection
+   ============================================ */
+::selection {
+  background: rgba(124, 148, 92, 0.3);
+  color: var(--fg-base);
+}
+
+/* ============================================
+   Links
+   ============================================ */
+a { color: var(--accent); text-decoration: none; transition: color var(--transition); }
+a:hover { color: #fff; }

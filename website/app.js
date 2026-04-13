@@ -49,6 +49,97 @@ function showToast(message, type = 'info') {
   }, 3000);
 }
 
+// ============================================
+// Group 13: Centralized fetch wrapper with error handling
+// ============================================
+async function apiFetch(url, options = {}) {
+  const h = options.headers || {};
+  if (state.csrfToken && !h['X-CSRF-Token']) h['X-CSRF-Token'] = state.csrfToken;
+  if (options.body && !h['Content-Type']) h['Content-Type'] = 'application/json';
+  try {
+    const res = await fetch(url, { ...options, headers: h });
+    if (res.status === 401) {
+      setLocked(true);
+      showToast('Session expired — please log in again', 'error');
+      return null;
+    }
+    if (res.status === 429) {
+      showToast('Rate limited — slow down', 'warning');
+      return null;
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showToast(data.error || `Request failed (${res.status})`, 'error');
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    showToast('Network error — check connection', 'error');
+    return null;
+  }
+}
+
+// ============================================
+// Group 11: Alert System
+// ============================================
+const alertState = { lastCount: 0, pollTimer: null, pollInterval: 30000 };
+
+function renderAlerts(notifications) {
+  const badge = document.getElementById('alert-badge');
+  const list = document.getElementById('alert-list');
+  if (!badge || !list) return;
+  const unread = notifications.filter(n => !n.dismissed);
+  if (unread.length > 0) {
+    badge.textContent = unread.length > 99 ? '99' : unread.length;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+  if (notifications.length === 0) {
+    list.innerHTML = '<div class="alert-empty">No alerts</div>';
+    return;
+  }
+  const iconMap = { error: '🔴', warning: '🟡', success: '🟢', info: '🔵' };
+  list.innerHTML = notifications.map(n => {
+    const icon = iconMap[n.type] || '⚪';
+    const time = new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `<div class="alert-item type-${n.type}" data-id="${n.id}">
+      <span class="alert-icon">${icon}</span>
+      <div class="alert-content">
+        <div class="alert-msg">${escHtml(n.message)}</div>
+        <div class="alert-time">${time}</div>
+      </div>
+      <button class="alert-dismiss" data-dismiss="${n.id}" title="Dismiss">×</button>
+    </div>`;
+  }).join('');
+}
+
+async function pollAlerts() {
+  const data = await apiFetch('/api/notifications');
+  if (data?.ok) {
+    renderAlerts(data.notifications || []);
+  }
+}
+
+function startAlertPolling() {
+  stopAlertPolling();
+  pollAlerts();
+  alertState.pollTimer = setInterval(pollAlerts, alertState.pollInterval);
+}
+
+function stopAlertPolling() {
+  if (alertState.pollTimer) {
+    clearInterval(alertState.pollTimer);
+    alertState.pollTimer = null;
+  }
+}
+
+function escHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
 const els = {
   shell: $('#shell'),
   topbar: $('#topbar'),
@@ -1170,6 +1261,7 @@ async function login(password) {
 
 async function logout() {
   stopAutoRefresh();
+  stopAlertPolling();
   const h = { 'Content-Type': 'application/json' };
   if (state.csrfToken) h['X-CSRF-Token'] = state.csrfToken;
   await fetch('/api/logout', { method: 'POST', headers: h }).catch(() => {});
@@ -1649,6 +1741,44 @@ function bindUi() {
   els.refreshBtn.addEventListener('click', fetchSnapshot);
   document.getElementById('auto-refresh-btn')?.addEventListener('click', toggleAutoRefresh);
 
+  // Group 12: Sidebar hamburger toggle
+  document.getElementById('sidebar-toggle-btn')?.addEventListener('click', () => {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    sidebar?.classList.toggle('mobile-open');
+    overlay?.classList.toggle('active');
+  });
+  document.getElementById('sidebar-overlay')?.addEventListener('click', () => {
+    document.getElementById('sidebar')?.classList.remove('mobile-open');
+    document.getElementById('sidebar-overlay')?.classList.remove('active');
+  });
+
+  // Group 11: Alert bell dropdown toggle
+  document.getElementById('alert-bell-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dropdown = document.getElementById('alert-dropdown');
+    dropdown?.classList.toggle('hidden');
+    if (!dropdown?.classList.contains('hidden')) pollAlerts();
+  });
+  document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('alert-dropdown');
+    if (dropdown && !e.target.closest('.alert-bell-wrap')) {
+      dropdown.classList.add('hidden');
+    }
+  });
+  document.getElementById('alert-clear-btn')?.addEventListener('click', async () => {
+    await apiFetch('/api/notifications/clear', { method: 'POST' });
+    pollAlerts();
+    showToast('Alerts cleared', 'success');
+  });
+  document.getElementById('alert-list')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-dismiss]');
+    if (!btn) return;
+    const id = btn.dataset.dismiss;
+    await apiFetch(`/api/notifications/${id}/dismiss`, { method: 'POST' });
+    pollAlerts();
+  });
+
   // Gateway toggle — event delegation (CSP-safe, no inline onclick)
   els.agentList?.addEventListener('click', (e) => {
     const btn = e.target.closest('.gw-toggle');
@@ -1782,9 +1912,22 @@ function startClock() {
 function startAutoRefresh() {
   stopAutoRefresh();
   if (!state.autoRefreshEnabled) return;
-  state.autoRefreshTimer = setInterval(() => {
-    fetchSnapshot();
-  }, 30000);
+  state.autoRefreshFailCount = 0;
+  state.autoRefreshTimer = setInterval(async () => {
+    try {
+      const res = await fetch('/api/dashboard-state');
+      if (!res.ok) throw new Error('fetch failed');
+      state.autoRefreshFailCount = 0;
+      const data = await res.json();
+      if (data?.snapshot) renderSnapshot(data.snapshot);
+    } catch {
+      state.autoRefreshFailCount = (state.autoRefreshFailCount || 0) + 1;
+      // Exponential backoff: after 3 failures, slow to 60s; after 6, slow to 120s
+      if (state.autoRefreshFailCount === 3 || state.autoRefreshFailCount === 6) {
+        startAutoRefresh();
+      }
+    }
+  }, state.autoRefreshFailCount >= 6 ? 120000 : state.autoRefreshFailCount >= 3 ? 60000 : 30000);
 }
 
 function stopAutoRefresh() {
@@ -1824,6 +1967,7 @@ async function boot() {
     await loadLayoutState();
     await fetchSnapshot();
     startAutoRefresh();
+    startAlertPolling();
     // Start log stream (agent logs, default level)
     setTimeout(() => startLogStream('agent', ''), 1000);
   } else {

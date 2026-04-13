@@ -1,19 +1,24 @@
 {
   "name": "hermes-control-interface",
-  "version": "2.0.0",
-  "description": "Hermes Control Interface web dashboard",
+  "version": "3.0.0",
+  "description": "Self-hosted web dashboard for the Hermes AI agent stack",
   "main": "server.js",
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "serve": "node server.js",
     "setup": "bash install.sh",
     "test": "node --test",
     "reset-password": "node scripts/reset-password.js"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "bcrypt": "^6.0.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
@@ -22,7 +27,9 @@
     "js-yaml": "^4.1.1",
     "node-pty": "^1.1.0",
     "ws": "^8.18.0",
-    "xterm": "^5.3.0",
-    "xterm-addon-fit": "^0.8.0"
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "vite": "^8.0.8"
   }
 }
