@@ -79,6 +79,8 @@ A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousRes
 - Doctor: run diagnostics, auto-fix issues
 - Dump: generate debug summary
 - Update: Hermes agent version update
+- Backup & Import: download/restore Hermes data as zip
+- HCI Restart: restart the Control Interface from UI
 - Users: create/delete users, role management
 - Auth: provider status (OpenRouter, Nous Portal, etc.)
 - Audit: timestamped activity log
@@ -207,6 +209,29 @@ See `docs/API.md` for full reference.
 Full audit: `docs/SECURITY-AUDIT-2.md`
 Score: 9.1/10 — Production-ready with caveats.
 
+## Updating HCI
+
+```bash
+# 1. Pull latest code
+cd /root/projects/hermes-control-interface  # or your install path
+git pull origin main
+
+# 2. Install dependencies (if package.json changed)
+npm install
+
+# 3. Rebuild frontend
+npm run build
+
+# 4. Restart production server
+kill $(lsof -t -i :10272) 2>/dev/null
+nohup node server.js &>/dev/null & disown
+```
+
+Or use the HCI UI: Maintenance → HCI Restart (restarts the server from the browser).
+
+**Non-root users:** Replace `/root/projects` with your user's project directory.
+If running via systemd, use `sudo systemctl restart hermes-control` instead of manual kill/restart.
+
 ## Changelog
 
 ### v3.2.0 (2026-04-14)
@@ -231,6 +256,7 @@ Score: 9.1/10 — Production-ready with caveats.
 - XSS: 15+ escaped user-facing error messages
 - Auth panel: data loaded async, doesn't block page load
 - CPR stripping: removed ANSI escape from terminal
+- Maintenance UI: added Backup & Import and HCI Restart buttons
 
 ### v3.1.0 (2026-04-12)
 - Skills Hub + Honcho panel + Gateway connections
