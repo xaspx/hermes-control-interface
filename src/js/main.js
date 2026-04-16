@@ -1759,17 +1759,14 @@ async function loadAgentConfig(container, name) {
       </div>
     `;
 
-    // Expose local render before any onclick can fire
-    window._renderLocalConfig = renderConfigCategory;
-
-    // Local edit helpers for the hamburger config tabs
+    // Edit helpers — delegate to global renderConfigCategory (set below)
     window._enableEditLocal = function(type) {
       const contentEl = document.getElementById('config-content');
-      if (contentEl) { contentEl.dataset.editMode = 'true'; renderConfigCategory(type); }
+      if (contentEl) { contentEl.dataset.editMode = 'true'; window.renderConfigCategory(type); }
     };
     window._cancelEditLocal = function(type) {
       const contentEl = document.getElementById('config-content');
-      if (contentEl) { contentEl.dataset.editMode = 'false'; renderConfigCategory(type); }
+      if (contentEl) { contentEl.dataset.editMode = 'false'; window.renderConfigCategory(type); }
     };
     window.saveSecretsLocal = async function(profile) {
       const inputs = document.querySelectorAll('[data-secret-name]');
@@ -1787,10 +1784,10 @@ async function loadAgentConfig(container, name) {
         } catch (e) { failed++; showToast('Error: ' + keyName, 'error'); }
       }
       showToast('Saved ' + saved + ' key(s)' + (failed ? ', ' + failed + ' failed' : ''), failed > 0 ? 'warning' : 'success');
-      renderConfigCategory('secrets');
+      window.renderConfigCategory('secrets');
     };
     window._saveConfigLocal = async function(profile, catKey) {
-      const catConfig = config[catKey];
+      const catConfig = state._config?.config[catKey];
       if (!catConfig) { showToast('Config not loaded', 'error'); return; }
       const updated = JSON.parse(JSON.stringify(catConfig));
       document.querySelectorAll('[data-cfg-key]').forEach(input => {
@@ -1806,166 +1803,15 @@ async function loadAgentConfig(container, name) {
           headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrfToken || '' },
           body: JSON.stringify({ config: { [catKey]: updated } })
         });
-        if (res.ok) { config[catKey] = updated; showToast('Config saved', 'success'); window._cancelEditLocal(catKey); }
+        if (res.ok) { state._config.config[catKey] = updated; showToast('Config saved', 'success'); window._cancelEditLocal(catKey); }
         else { showToast(res.output || 'Save failed', 'error'); }
       } catch (e) { showToast(e.message, 'error'); }
     };
 
-    function renderConfigCategory(catKey) {
-      const contentEl = document.getElementById('config-content');
-      if (!contentEl) return;
-      const isEditMode = contentEl.dataset.editMode === 'true';
+    // renderConfigCategory is now global (defined below)
 
-      if (catKey === 'raw') {
-        contentEl.innerHTML = `
-          <div class="card">
-            <div class="card-title">Raw Config (read-only)</div>
-            <pre style="font-size:11px;white-space:pre-wrap;max-height:500px;overflow-y:auto;color:var(--fg-muted);">${escapeHtml(rawYaml || JSON.stringify(config, null, 2))}</pre>
-          </div>
-        `;
-        return;
-      }
-
-      if (catKey === 'secrets') {
-        const keysRes = api(`/api/keys/${name}`).then(r => r.ok ? r : { ok: false, keys: [] });
-        
-        contentEl.innerHTML = `
-          <div class="card">
-            <div class="card-title">Environment Secrets</div>
-            <div class="loading">Loading secrets...</div>
-          </div>
-        `;
-        
-        keysRes.then(keysRes => {
-          const keysData = keysRes.ok ? keysRes.keys : [];
-          
-          let secretsHtml = `
-            <div class="card">
-              <div class="card-title">Environment Secrets</div>
-          `;
-          
-          if (keysData.length === 0) {
-            secretsHtml += `<div class="stat-row"><span class="stat-label">No secrets configured</span></div>`;
-          } else {
-            secretsHtml += `<table class="data-table"><thead><tr><th>Key</th><th>Value</th><th>Actions</th></tr></thead><tbody>`;
-            keysData.forEach(k => {
-              const maskedValue = k.masked;
-              secretsHtml += `
-                <tr>
-                  <td class="mono" style="font-size:11px;">${escapeHtml(k.name)}</td>
-                  <td><span class="mono" style="font-size:11px;${isEditMode ? '' : 'filter: blur(2px)'}">${isEditMode ? k.value : maskedValue}</span></td>
-                  <td style="display:flex;gap:4px;">
-                    ${isEditMode ? 
-                      `<button class="btn btn-ghost btn-sm" onclick="window.revealSecret('${escapeHtml(k.name)}','${name}')">👁</button>
-                      <button class="btn btn-ghost btn-sm" onclick="window.deleteSecret('${escapeHtml(k.name)}','${name}')">×</button>` :
-                      `<button class="btn btn-ghost btn-sm" onclick="window.revealSecret('${escapeHtml(k.name)}','${name}')">👁</button>`
-                    }
-                  </td>
-                </tr>
-              `;
-            });
-            secretsHtml += `</tbody></table>`;
-          }
-
-          // Edit mode controls
-          if (isEditMode) {
-            secretsHtml += `
-              <div style="margin-top:12px;display:flex;gap:8px;">
-                <button class="btn btn-primary" onclick="window.saveSecretsLocal('${name}')">💾 Save</button>
-                <button class="btn btn-ghost" onclick="window._cancelEditLocal('secrets')">↺ Revert</button>
-              </div>
-            `;
-          } else {
-            secretsHtml += `
-              <div style="margin-top:12px;">
-                <button class="btn btn-primary" onclick="window._enableEditLocal('secrets')">✏️ Edit</button>
-              </div>
-            `;
-          }
-
-          secretsHtml += `</div>`;
-          contentEl.innerHTML = secretsHtml;
-        }).catch(() => {
-          contentEl.innerHTML = `<div class="card"><div class="card-title">Secrets</div><div class="error-msg">Failed to load secrets</div></div>`;
-        });
-        return;
-      }
-
-      const data = config[catKey] || {};
-      const entries = Object.entries(data);
-
-      if (entries.length === 0) {
-        contentEl.innerHTML = `<div class="card"><div class="card-title">${catKey}</div><div class="stat-row"><span class="stat-label">No settings configured</span></div></div>`;
-        return;
-      }
-
-      // Edit mode controls
-      let editControls = '';
-      if (isEditMode) {
-        editControls = `
-          <div style="margin-bottom:12px;display:flex;gap:8px;">
-            <button class="btn btn-primary" onclick="window._saveConfigLocal('${name}','${catKey}')">💾 Save</button>
-            <button class="btn btn-ghost" onclick="window._cancelEditLocal('${catKey}')">↺ Revert</button>
-          </div>
-        `;
-      }
-
-      contentEl.innerHTML = `
-        <div class="card">
-          <div class="card-title">${categories.find(c => c.key === catKey)?.label || catKey}</div>
-          ${editControls}
-          ${entries.map(([k, v]) => {
-            const isBool = typeof v === 'boolean';
-            const isNum = typeof v === 'number';
-            const isObj = typeof v === 'object' && v !== null;
-            const isSensitive = /key|token|secret|password|passwd/i.test(k);
-            
-            if (isEditMode) {
-              if (isBool) {
-                return `
-                  <div class="stat-row">
-                    <span class="stat-label">${escapeHtml(k)}</span>
-                    <label style="display:flex;align-items:center;gap:6px;">
-                      <input type="checkbox" id="config-input-${escapeHtml(k)}" data-cfg-key="${escapeHtml(k)}" data-cfg-type="bool" ${v ? 'checked' : ''} style="accent-color:var(--gold);" />
-                      <span style="font-size:12px;color:var(--fg);">${v ? 'Enabled' : 'Disabled'}</span>
-                    </label>
-                  </div>
-                `;
-              } else if (isNum) {
-                return `
-                  <div class="stat-row">
-                    <span class="stat-label">${escapeHtml(k)}</span>
-                    <input type="number" id="config-input-${escapeHtml(k)}" data-cfg-key="${escapeHtml(k)}" data-cfg-type="num" value="${v}" style="width:160px;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--fg);font-size:12px;" />
-                  </div>
-                `;
-              } else {
-                const inputType = isSensitive ? 'password' : 'text';
-                return `
-                  <div class="stat-row">
-                    <span class="stat-label">${escapeHtml(k)}</span>
-                    <div style="display:flex;gap:4px;flex:1;max-width:60%;">
-                      <input type="${inputType}" id="config-input-${escapeHtml(k)}" data-cfg-key="${escapeHtml(k)}" data-cfg-type="str" value="${escapeHtml(String(v ?? ''))}" style="flex:1;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--fg);font-size:12px;" />
-                      ${isSensitive ? `<button type="button" onclick="this.previousElementSibling.type=this.previousElementSibling.type==='password'?'text':'password'" style="background:none;border:none;cursor:pointer;font-size:13px;padding:4px;color:var(--fg-muted);">👁</button>` : ''}
-                    </div>
-                  </div>
-                `;
-              }
-            } else {
-              const display = isObj ? `{${Object.keys(v).length} keys}` : String(v ?? '');
-              return `
-                <div class="stat-row">
-                  <span class="stat-label">${escapeHtml(k)}</span>
-                  <span class="stat-value">${isBool ? (v ? '✓ enabled' : '✗ disabled') : escapeHtml(display)}</span>
-                </div>
-              `;
-            }
-          }).join('')}
-        </div>
-      `;
-    }
-
-    // Initial render
-    renderConfigCategory(categories[0].key);
+    // Initial render — use global renderConfigCategory (defined below)
+    window.renderConfigCategory(categories[0].key);
 
     // Tab switching
     document.getElementById('config-tabs')?.addEventListener('click', (e) => {
@@ -1973,7 +1819,7 @@ async function loadAgentConfig(container, name) {
       if (!tab) return;
       document.querySelectorAll('#config-tabs .tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
-      renderConfigCategory(tab.dataset.cat);
+      window.renderConfigCategory(tab.dataset.cat);
     });
 
   } catch (e) {
@@ -3978,168 +3824,324 @@ Object.assign(window, {
 // ============================================
 // Logs Functions
 // Logs page with pagination
-const LOGS_PER_PAGE = 50;
-const LOGS_MAX_FETCH = 500;
+const LOGS_MAX_LINES = 500;
+
+// Level shortcut mapping
+const LEVEL_MAP = { info: 'INF', debug: 'DBG', error: 'ERR', warn: 'WRN', system: 'SYS', user: 'USR' };
+const LEVEL_STYLES = {
+  INF: 'color:var(--fg-muted)',
+  DBG: 'color:var(--fg-subtle)',
+  ERR: 'color:var(--coral,#ff6b6b);font-weight:600',
+  WRN: 'color:var(--gold,#ffac02)',
+  SYS: 'color:var(--teal,#4ecdc4)',
+  USR: 'color:var(--purple,#a78bfa)',
+};
 
 async function loadLogs(container) {
+  state._logsData = [];
+  state._logsAutoRefresh = true;
+  state._logsMode = 'poll';
+  state._logsStickyBottom = true;
+  state._logsLevel = '';
+  state._logsComponent = '';
+
   container.innerHTML = `
-    <div class="logs-toolbar">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <select id="logs-profile" class="log-level-select" onchange="changeLogsPage(1)" style="width:120px;">
-          <option value="all">All Profiles</option>
+    <div id="logs-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <select id="logs-source" class="log-level-select" onchange="refreshLogs()" style="width:100px;">
+          <option value="all">all</option>
+          <option value="agent">agent</option>
+          <option value="error">errors</option>
+          <option value="gateway">gateway</option>
         </select>
-        <select id="logs-source" class="log-level-select" onchange="changeLogsPage(1)" style="width:120px;">
-          <option value="all">All Sources</option>
-        </select>
-        <select id="logs-level" class="log-level-select" onchange="changeLogsPage(1)" style="width:120px;">
-          <option value="">All Levels</option>
-          <option value="error">Error</option>
-          <option value="warn">Warning</option>
-          <option value="debug">Debug</option>
-          <option value="info">Info</option>
-        </select>
-        <input id="logs-search" class="search-input" placeholder="Search logs…" oninput="debounceLogsSearch()" />
       </div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <button class="btn btn-ghost btn-sm" id="logs-auto-btn" onclick="toggleLogsAutoRefresh()">◯ auto</button>
-        <button class="btn btn-ghost btn-sm" onclick="changeLogsPage(1)">⟳ Refresh</button>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <span style="font-size:11px;color:var(--fg-muted);">Level:</span>
+        <div id="logs-level-btns" style="display:flex;gap:3px;">
+          <button class="btn btn-ghost btn-sm logs-lvl-btn active" data-level="" onclick="setLogsLevel('')">ALL</button>
+          <button class="btn btn-ghost btn-sm logs-lvl-btn" data-level="info" onclick="setLogsLevel('info')">INF</button>
+          <button class="btn btn-ghost btn-sm logs-lvl-btn" data-level="debug" onclick="setLogsLevel('debug')">DBG</button>
+          <button class="btn btn-ghost btn-sm logs-lvl-btn" data-level="warn" onclick="setLogsLevel('warn')">WRN</button>
+          <button class="btn btn-ghost btn-sm logs-lvl-btn" data-level="error" onclick="setLogsLevel('error')">ERR</button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <span style="font-size:11px;color:var(--fg-muted);">Lines:</span>
+        <select id="logs-lines" class="log-level-select" onchange="refreshLogs()" style="width:70px;">
+          <option value="50">50</option>
+          <option value="100" selected>100</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <span style="font-size:11px;color:var(--fg-muted);">Search:</span>
+        <input id="logs-search" class="search-input" placeholder="keyword..." oninput="debounceLogsSearch()" style="width:140px;" />
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+        <button class="btn btn-ghost btn-sm" id="logs-auto-btn" onclick="toggleLogsAuto()">● auto</button>
+        <select id="logs-mode" class="log-level-select" onchange="setLogsMode(this.value)" style="width:60px;" title="Refresh mode">
+          <option value="poll">poll</option>
+          <option value="stream">stream</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="clearLogs()">Clear</button>
+        <button class="btn btn-ghost btn-sm" onclick="refreshLogs()">⟳</button>
       </div>
     </div>
-    <div id="logs-list"></div>
-    <div id="logs-pagination" style="display:none;align-items:center;justify-content:center;gap:8px;padding:12px 0;flex-wrap:wrap;"></div>
+    <div id="logs-component-bar" style="display:none;margin-bottom:6px;padding:4px 8px;background:var(--bg-inset);border-radius:6px;font-size:11px;align-items:center;gap:6px;">
+      <span style="color:var(--fg-muted);">Filtering:</span>
+      <span id="logs-component-tag" style="color:var(--teal);font-weight:600;"></span>
+      <button class="btn btn-ghost btn-sm" onclick="clearLogsComponent()" style="font-size:10px;padding:1px 6px;">✕</button>
+    </div>
+    <div id="logs-panel" style="position:relative;max-height:calc(100vh - 280px);overflow-y:auto;font-family:var(--font-mono,monospace);font-size:12px;line-height:1.7;"></div>
+    <div id="logs-jump-btn" style="display:none;position:fixed;bottom:80px;right:24px;z-index:100;">
+      <button class="btn btn-primary btn-sm" onclick="scrollLogsBottom()" style="box-shadow:0 2px 8px rgba(0,0,0,0.3);">↓ New logs</button>
+    </div>
+    <div id="logs-stats" style="display:flex;align-items:center;gap:12px;padding:6px 0;font-size:11px;color:var(--fg-muted);border-top:1px solid var(--border);margin-top:8px;"></div>
   `;
 
-  // Init state
-  state._logsData = [];
-  state._logsPage = 1;
-  state._logsTotal = 0;
+  // Track scroll to show/hide jump button
+  const panel = document.getElementById('logs-panel');
+  if (panel) {
+    panel.addEventListener('scroll', () => {
+      const atBottom = (panel.scrollHeight - panel.scrollTop - panel.clientHeight) < 40;
+      state._logsStickyBottom = atBottom;
+      const jumpBtn = document.getElementById('logs-jump-btn');
+      if (jumpBtn) jumpBtn.style.display = atBottom ? 'none' : 'block';
+    });
+  }
 
   refreshLogs();
 }
 
 async function refreshLogs() {
-  const profile = document.getElementById("logs-profile")?.value || "all";
-  const source = document.getElementById("logs-source")?.value || "all";
-  const level = document.getElementById("logs-level")?.value || "";
-  const search = document.getElementById("logs-search")?.value || "";
-  const container = document.getElementById("logs-list");
-  if (!container) return;
-
-  container.innerHTML = '<div class="loading">Loading logs</div>';
+  const source = document.getElementById('logs-source')?.value || 'all';
+  const lines = document.getElementById('logs-lines')?.value || '100';
+  const search = document.getElementById('logs-search')?.value || '';
+  const level = state._logsLevel || '';
+  const component = state._logsComponent || '';
 
   try {
-    const o = new URLSearchParams({ profile, source, lines: String(LOGS_MAX_FETCH) });
-    if (level) o.set("level", level);
-    if (search) o.set("search", search);
+    const params = new URLSearchParams({ profile: 'all', source, lines });
+    if (level) params.set('level', level);
+    if (search) params.set('search', search);
 
-    const r = await api("/api/logs?" + o);
+    const r = await api('/api/logs?' + params);
     if (r.ok && r.logs) {
-      state._logsData = r.logs;
-      state._logsTotal = r.logs.length;
-      state._logsPage = 1;
-      renderLogsPage(1);
-    } else {
-      container.innerHTML = `<div class="error-msg">Error loading logs</div>`;
+      let logs = r.logs;
+
+      // Client-side component filter
+      if (component) {
+        logs = logs.filter(l => (l.component || '').toLowerCase() === component.toLowerCase());
+      }
+
+      state._logsData = logs;
+      renderLogs();
     }
   } catch (e) {
-    container.innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
+    // Silent fail on refresh errors
   }
 }
 
-function renderLogsPage(page) {
-  const container = document.getElementById("logs-list");
-  const pager = document.getElementById("logs-pagination");
-  if (!container || !pager) return;
+function renderLogs() {
+  const panel = document.getElementById('logs-panel');
+  const stats = document.getElementById('logs-stats');
+  if (!panel) return;
 
-  const perPage = LOGS_PER_PAGE;
-  const total = state._logsTotal;
-  const totalPages = Math.max(1, Math.ceil(total / perPage));
-  const pageNum = Math.min(Math.max(1, page), totalPages);
-  state._logsPage = pageNum;
-
-  const start = (pageNum - 1) * perPage;
-  const end = start + perPage;
-  const pageLogs = state._logsData.slice(start, end);
-
-  if (pageLogs.length === 0) {
-    container.innerHTML = `<div class="empty">No log entries found</div>`;
-    pager.style.display = 'none';
+  const logs = state._logsData;
+  if (!logs.length) {
+    panel.innerHTML = `<div style="padding:20px;text-align:center;color:var(--fg-subtle);">No log entries</div>`;
+    if (stats) stats.innerHTML = '';
     return;
   }
 
-  // Render log cards
-  container.innerHTML = pageLogs.map(e => {
-    const lvl = e.level === "error" ? "error-msg" : e.level === "warn" ? "warning" : e.level === "debug" ? "subtle" : "";
-    const time = e.timestamp ? e.timestamp.replace(/T/, " ").replace(/\.\d+Z?/, "") : "—";
-    const lvlBadge = e.level
-      ? `<span class="badge ${e.level === 'error' ? 'error' : e.level === 'warn' ? 'warning' : 'inactive'}" style="font-size:9px;padding:1px 5px;">${e.level.toUpperCase()}</span>`
-      : '';
-    const profBadge = e.profile ? `<span class="badge inactive" style="font-size:9px;padding:1px 5px;color:var(--accent);">[${escapeHtml(e.profile)}]</span>` : '';
-    const srcBadge = e.source ? `<span class="badge inactive" style="font-size:9px;padding:1px 5px;">${escapeHtml(e.source)}</span>` : '';
-    const msg = escapeHtml(e.message || '');
-    const isLong = (e.message || '').length > 300;
-    const shortMsg = isLong ? msg.substring(0, 300) : msg;
-    const msgId = 'log-msg-' + Math.random().toString(36).slice(2);
+  // Aggregate consecutive duplicate errors
+  const aggregated = [];
+  let prevKey = '';
+  let count = 0;
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const e = logs[i];
+    const key = `${e.level}|${e.message}`;
+    if (key === prevKey) {
+      count++;
+    } else {
+      if (prevKey && count > 1) {
+        aggregated[aggregated.length - 1].count = count;
+      }
+      aggregated.push(e);
+      prevKey = key;
+      count = 1;
+    }
+  }
+  if (count > 1) aggregated[aggregated.length - 1].count = count;
 
-    return `
-      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden;">
-        <div style="display:flex;align-items:center;gap:6px;padding:8px 12px 6px;flex-wrap:wrap;">
-          <span style="font-size:10px;color:var(--fg-muted);font-family:var(--font);">${time}</span>
-          ${profBadge}
-          ${srcBadge}
-          ${lvlBadge}
-          <span style="margin-left:auto;font-size:10px;color:var(--fg-subtle);">#${start + pageLogs.indexOf(e) + 1}</span>
-        </div>
-        <div style="padding:0 12px 10px;">
-          <div class="log-msg-text ${lvl}" style="font-size:13px;line-height:1.5;word-break:break-word;">${shortMsg}</div>
-          ${isLong ? `<button class="btn btn-link btn-sm" onclick="toggleLogExpand('${msgId}')" style="margin-top:4px;font-size:11px;color:var(--fg-muted);">▾ Show more</button><div id="${msgId}" style="display:none;" class="log-msg-text ${lvl}" style="font-size:13px;line-height:1.5;word-break:break-word;margin-top:6px;">${msg}</div>` : ''}
-        </div>
-      </div>`;
+  // Reverse to show newest first
+  aggregated.reverse();
+
+  // Level counts
+  const lvlCounts = { INF: 0, DBG: 0, ERR: 0, WRN: 0, SYS: 0, USR: 0 };
+  logs.forEach(e => {
+    const s = LEVEL_MAP[e.level] || 'INF';
+    lvlCounts[s] = (lvlCounts[s] || 0) + 1;
+  });
+
+  // Collect unique components
+  const components = [...new Set(logs.map(e => e.component).filter(Boolean))];
+
+  // Render lines
+  let html = aggregated.map(e => {
+    const shortLvl = LEVEL_MAP[e.level] || 'INF';
+    const style = LEVEL_STYLES[shortLvl] || '';
+    const time = e.timestamp ? fmtLogTime(e.timestamp) : '        ';
+    const comp = e.component || e.source || '';
+    const msg = escapeHtml(e.message || '');
+    const countBadge = e.count > 1 ? `<span style="color:var(--coral);font-weight:700;margin-left:4px;">×${e.count}</span>` : '';
+    const copyIcon = `<span class="log-copy-icon" onclick="copyLogLine(this)" title="Copy" style="cursor:pointer;opacity:0;transition:opacity 0.15s;color:var(--fg-muted);margin-left:6px;">⧉</span>`;
+
+    // Make component clickable for filtering
+    const compSpan = comp ? `<span class="log-comp" onclick="setLogsComponent('${escapeHtml(comp)}')" style="cursor:pointer;color:var(--teal);text-decoration:none;" title="Filter by ${escapeHtml(comp)}">${escapeHtml(comp)}</span>` : '';
+
+    return `<div class="log-line" onmouseenter="this.querySelector('.log-copy-icon').style.opacity=1" onmouseleave="this.querySelector('.log-copy-icon').style.opacity=0" style="display:flex;align-items:baseline;padding:1px 4px;border-radius:3px;${shortLvl === 'ERR' ? 'background:rgba(255,107,107,0.06);' : ''}${shortLvl === 'WRN' ? 'background:rgba(255,172,2,0.04);' : ''}">
+      <span style="color:var(--fg-subtle);user-select:none;min-width:70px;">[${time}]</span>
+      <span style="${style};min-width:32px;text-align:center;font-weight:600;user-select:none;">${shortLvl}</span>
+      ${compSpan ? compSpan + ' ' : '<span style="min-width:40px;"></span>'}
+      <span style="flex:1;word-break:break-all;">${msg}${countBadge}</span>${copyIcon}
+    </div>`;
   }).join('');
 
-  // Render pagination controls
-  const prevDisabled = pageNum <= 1 ? 'opacity:0.4;pointer-events:none;' : '';
-  const nextDisabled = pageNum >= totalPages ? 'opacity:0.4;pointer-events:none;' : '';
-  pager.style.display = 'flex';
-  pager.innerHTML = `
-    <button class="btn btn-ghost btn-sm" onclick="changeLogsPage(${pageNum - 1})" style="${prevDisabled}">← Prev</button>
-    <span style="font-size:11px;color:var(--fg-muted);padding:0 8px;">Page ${pageNum} of ${totalPages}</span>
-    <span style="font-size:11px;color:var(--fg-subtle);padding:0 4px;">(${total} entries)</span>
-    <button class="btn btn-ghost btn-sm" onclick="changeLogsPage(${pageNum + 1})" style="${nextDisabled}">Next →</button>
-    <div style="display:flex;gap:4px;margin-left:12px;">
-      ${Array.from({length: Math.min(5, totalPages)}, (_, i) => {
-        const p = i + 1;
-        const active = p === pageNum ? 'background:var(--accent-dim);border-color:var(--accent);' : '';
-        return `<button class="btn btn-ghost btn-sm" onclick="changeLogsPage(${p})" style="min-width:32px;${active}">${p}</button>`;
-      }).join('')}
-    </div>
-  `;
+  panel.innerHTML = html;
+
+  // Scroll to bottom if sticky
+  if (state._logsStickyBottom) {
+    requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
+  }
+
+  // Stats bar
+  if (stats) {
+    stats.innerHTML = `
+      <span>${logs.length} entries</span>
+      <span style="color:${LEVEL_STYLES.INF}">INF ${lvlCounts.INF}</span>
+      <span style="color:${LEVEL_STYLES.DBG}">DBG ${lvlCounts.DBG}</span>
+      <span style="color:${LEVEL_STYLES.WRN}">WRN ${lvlCounts.WRN}</span>
+      <span style="color:${LEVEL_STYLES.ERR}">ERR ${lvlCounts.ERR}</span>
+      ${components.length > 0 ? `<span style="margin-left:auto;color:var(--fg-subtle);">${components.length} components</span>` : ''}
+    `;
+  }
 }
 
-window.changeLogsPage = function(page) {
-  renderLogsPage(page);
+function fmtLogTime(ts) {
+  // Convert ISO or full timestamp to HH:MM:SS
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) {
+    // Try extracting time from string
+    const m = ts.match(/(\d{2}):(\d{2}):(\d{2})/);
+    return m ? `${m[1]}:${m[2]}:${m[3]}` : ts.slice(-8);
+  }
+  return d.toTimeString().slice(0, 8);
+}
+
+// --- Log actions ---
+
+function setLogsLevel(lvl) {
+  state._logsLevel = lvl;
+  document.querySelectorAll('.logs-lvl-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.level === lvl);
+  });
+  refreshLogs();
+}
+
+function setLogsComponent(comp) {
+  state._logsComponent = comp;
+  const bar = document.getElementById('logs-component-bar');
+  const tag = document.getElementById('logs-component-tag');
+  if (bar && tag && comp) {
+    bar.style.display = 'flex';
+    tag.textContent = comp;
+  }
+  refreshLogs();
+}
+
+window.clearLogsComponent = function() {
+  state._logsComponent = '';
+  const bar = document.getElementById('logs-component-bar');
+  if (bar) bar.style.display = 'none';
+  refreshLogs();
 };
 
-window.toggleLogExpand = function(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  const isHidden = el.style.display === 'none';
-  el.style.display = isHidden ? 'block' : 'none';
-  el.previousElementSibling.textContent = isHidden ? '▴ Show less' : '▾ Show more';
+window.clearLogs = function() {
+  state._logsData = [];
+  renderLogs();
 };
 
-function toggleLogsAutoRefresh() {
+window.scrollLogsBottom = function() {
+  const panel = document.getElementById('logs-panel');
+  if (panel) {
+    panel.scrollTop = panel.scrollHeight;
+    state._logsStickyBottom = true;
+    const jumpBtn = document.getElementById('logs-jump-btn');
+    if (jumpBtn) jumpBtn.style.display = 'none';
+  }
+};
+
+window.copyLogLine = function(icon) {
+  const line = icon.closest('.log-line');
+  if (!line) return;
+  const text = line.textContent.replace('⧉', '').trim();
+  navigator.clipboard.writeText(text).then(() => {
+    icon.textContent = '✓';
+    setTimeout(() => { icon.textContent = '⧉'; }, 1000);
+  });
+};
+
+// --- Auto refresh ---
+
+function toggleLogsAuto() {
+  if (state._logsAutoRefresh) {
+    stopLogsAutoRefresh();
+  } else {
+    state._logsAutoRefresh = true;
+    startLogsAutoRefresh();
+    refreshLogs();
+  }
+  updateLogsAutoBtn();
+}
+
+function startLogsAutoRefresh() {
+  stopLogsAutoRefresh();
+  if (state._logsMode === 'stream') {
+    // Stream mode: use shorter interval (simulated — real WebSocket in future)
+    state._logsInterval = setInterval(refreshLogs, 2000);
+  } else {
+    // Poll mode: standard 5s interval
+    state._logsInterval = setInterval(refreshLogs, 5000);
+  }
+}
+
+function stopLogsAutoRefresh() {
   if (state._logsInterval) {
     clearInterval(state._logsInterval);
     state._logsInterval = null;
-    const btn = document.getElementById("logs-auto-btn");
-    if (btn) { btn.textContent = "◯ auto"; btn.classList.remove("active"); }
-    return;
   }
-  state._logsInterval = setInterval(refreshLogs, 5000);
-  const btn = document.getElementById("logs-auto-btn");
-  if (btn) { btn.textContent = "● auto"; btn.classList.add("active"); }
-  refreshLogs();
+}
+
+function updateLogsAutoBtn() {
+  const btn = document.getElementById('logs-auto-btn');
+  if (!btn) return;
+  if (state._logsAutoRefresh) {
+    btn.textContent = '● auto';
+    btn.classList.add('active');
+  } else {
+    btn.textContent = '◯ auto';
+    btn.classList.remove('active');
+  }
+}
+
+function setLogsMode(mode) {
+  state._logsMode = mode;
+  if (state._logsAutoRefresh) {
+    startLogsAutoRefresh();
+  }
 }
 
 function debounceLogsSearch() {
@@ -4147,8 +4149,13 @@ function debounceLogsSearch() {
   state._logsDebounce = setTimeout(refreshLogs, 400);
 }
 
-
-// ============================================
+// Start auto refresh on load
+function initLogsAutoRefresh() {
+  if (state._logsAutoRefresh) {
+    startLogsAutoRefresh();
+    updateLogsAutoBtn();
+  }
+}
 
 window.loadUsage = loadUsage;
 window.fetchUsageData = fetchUsageData;
@@ -4202,7 +4209,10 @@ function loadMoreNotifs() {
 window.dismissNotif = dismissNotif;
 window.loadMoreNotifs = loadMoreNotifs;
 window.refreshLogs = refreshLogs;
-window.toggleLogsAutoRefresh = toggleLogsAutoRefresh;
+window.toggleLogsAuto = toggleLogsAuto;
+window.setLogsLevel = setLogsLevel;
+window.setLogsComponent = setLogsComponent;
+window.setLogsMode = setLogsMode;
 window.debounceLogsSearch = debounceLogsSearch;
 window.showCreateUser = showCreateUser;
 window.showEditUser = showEditUser;
@@ -4371,6 +4381,9 @@ function renderConfigCategory(catKey) {
     `;
   }
 }
+
+// Export for inline onclick handlers
+window.renderConfigCategory = renderConfigCategory;
 
 // Save config from form-based editor
 window.saveConfigForm = async function(profile, category) {

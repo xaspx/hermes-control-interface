@@ -807,6 +807,31 @@
 }
 
 /* ============================================
+   Logs Page
+   ============================================ */
+.logs-lvl-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  opacity: 0.7;
+}
+.logs-lvl-btn.active {
+  opacity: 1;
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.logs-lvl-btn:hover {
+  opacity: 1;
+}
+.log-line:hover {
+  background: var(--bg-inset);
+}
+.log-comp:hover {
+  text-decoration: underline;
+}
+
+/* ============================================
    Responsive
    ============================================ */
 
