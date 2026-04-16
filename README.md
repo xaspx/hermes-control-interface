@@ -3,7 +3,7 @@
 A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Browser-based terminal, file explorer, session management, cron scheduling, token analytics, and multi-agent administration — all behind a password gate.
 
 **Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js
-**Version:** 3.2.0
+**Version:** 3.3.0
 
 ---
 
@@ -206,8 +206,8 @@ See `docs/API.md` for full reference.
 
 ## Security Audit
 
-Full audit: `docs/SECURITY-AUDIT-2.md`
-Score: 9.1/10 — Production-ready with caveats.
+Full audit: `docs/SECURITY_AUDIT.md`
+Score: 7.0/10 — Production-ready with recommended fixes.
 
 ## Updating HCI
 
@@ -233,6 +233,39 @@ Or use the HCI UI: Maintenance → HCI Restart (restarts the server from the bro
 If running via systemd, use `sudo systemctl restart hermes-control` instead of manual kill/restart.
 
 ## Changelog
+
+### v3.3.0 (2026-04-17)
+**Chat Revamp:**
+- Hermes chat output format: auto-detect new `session_id:` and legacy `Session:` ID formats
+- New chat: `--continue ""` (empty) creates fresh session vs bare `--continue` resumes last
+- Tool call cards: collapsible tool calls with JSON viewer, collapsed by default
+- Banner suppression: `-Q` flag passed to hermes for clean output
+- Sidebar: model tag, session list, resume/new chat buttons
+
+**User Management v2 (RBAC):**
+- 28 permissions across 12 groups: Sessions, Chat, Logs, Usage, Gateway, Config, Secrets, Skills, Cron, Files, Terminal, Users, System
+- Built-in roles: `admin` (full), `viewer` (read-only)
+- Create/edit user modal: role presets, grouped permission checklist, reset password
+- Permission gating on 9 previously-unprotected endpoints: `/api/chat/send`, `/api/chat`, `/api/cron`, `/api/terminal/exec`, `/api/usage`, `/api/profiles/use`, `/api/plugins`, `/api/agents/*/sessions`
+
+**Security:**
+- Security audit (docs/SECURITY_AUDIT.md) — score 7.0/10, 3 critical/medium issues found and fixed
+- XSS fix: `loadHomeCards()` now escapes all dynamic values with `escapeHtml()`
+- Rate limiter: terminal exec limited to 30 commands/minute per IP
+- Token cleanup: proper `setInterval()` every 15 minutes (was only on creation)
+- Admin-only gate: `GET /api/plugins` now requires `admin` role
+- Full activity audit log in Maintenance → Audit panel
+
+**Skills:**
+- Check updates: handles "unavailable" source status gracefully
+- Uninstall: uses stdin pipe (`echo y |`) instead of `--yes` flag
+
+**UX & Bug Fixes:**
+- Notification dismiss: backend handles both `/api/notifications/:id/dismiss` and `/api/notifications/dismiss`
+- Sidebar: responsive CSS, `flex-shrink:0`, mobile breakpoints at 480px
+- Agent dropdown: follows dark/light theme
+- Favicon: moved to `public/` to prevent Vite hash mismatch causing 404 loop
+- HCI Info panel in Maintenance: version, GitHub link, Twitter @bayendor link
 
 ### v3.2.0 (2026-04-14)
 **Performance:**

@@ -10,10 +10,14 @@
 
 **Rate limiting:** IPs are blocked from authenticating after 5 failed attempts within a 15-minute window. This does not prevent brute-force attacks entirely but significantly raises the cost.
 
-**Weaknesses:**
-- Single shared password — no per-user isolation
-- No MFA
-- No login attempt notification (could silently tolerate brute force if attacker has enough time)
+## Multi-User Access
+
+**Multi-user via RBAC v2.** Role-Based Access Control with two built-in roles:
+
+- **admin** — full access to all features including user management, system controls, and secrets
+- **viewer** — read-only access to sessions, logs, and usage analytics
+
+Create additional users via the Maintenance → Users panel. All users share the same login password format but have isolated permissions. Treat the admin password like a root password.
 
 ## Cookies
 

@@ -2,27 +2,6 @@
 
 ---
 
-## install.sh
-
-### `install.sh: line XX: syntax error near unexpected token '('`
-
-The install script has broken shell syntax. Most commonly caused by unclosed quotes in `grep` patterns that merge subsequent lines into one invalid command.
-
-**Workaround:** Skip `install.sh` and install manually:
-
-```bash
-git clone https://github.com/xaspx/hermes-control-interface.git
-cd hermes-control-interface
-npm install
-cp .env.example .env
-# Edit .env — set HERMES_CONTROL_PASSWORD and HERMES_CONTROL_SECRET
-npm start
-```
-
-See [README Quick Start](../README.md#quick-start) for details.
-
----
-
 ## Server won't start
 
 ### `Error: Missing HERMES_CONTROL_PASSWORD or HERMES_CONTROL_SECRET environment variables`
