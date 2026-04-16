@@ -593,16 +593,20 @@ async function loadHCIPanel() {
       api('/api/health'),
       api('/api/system/health'),
     ]);
-    const hciVersion = pkgRes.hci_version || '—';
-    const hermesVersion = pkgRes.hermes_version || '—';
-    const nodeVersion = pkgRes.node_version || '—';
-    const isHealthy = healthRes.ok;
+    const hciVersion = (pkgRes?.hci_version) || '—';
+    const hermesVersion = (pkgRes?.hermes_version) || '—';
+    const nodeVersion = (pkgRes?.node_version) || '—';
+    const cpu = (pkgRes?.cpu) || '—';
+    const ram = (pkgRes?.ram) || '—';
+    const isHealthy = healthRes?.ok || false;
 
     el.innerHTML = `
       <div class="card-title">HCI</div>
       <div class="stat-row"><span class="stat-label">Version</span><span class="stat-value">${hciVersion}</span></div>
       <div class="stat-row"><span class="stat-label">Hermes</span><span class="stat-value">${hermesVersion}</span></div>
       <div class="stat-row"><span class="stat-label">Node</span><span class="stat-value">${nodeVersion}</span></div>
+      <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value">${cpu}%</span></div>
+      <div class="stat-row"><span class="stat-label">RAM</span><span class="stat-value">${ram}</span></div>
       <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value ${isHealthy ? 'status-ok' : 'status-off'}">${isHealthy ? '● Healthy' : '○ Error'}</span></div>
       <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;">
         <button class="btn btn-ghost btn-sm" onclick="hcirestart()">⟲ Restart</button>
@@ -987,8 +991,30 @@ window.uninstallSkill = async function(skillName, profile) {
 
 window.checkSkillUpdates = async function(profile) {
   try {
+    showToast('Checking for updates...', 'info');
     const res = await api('/api/skills/check', { method: 'POST', body: JSON.stringify({ profile }) });
-    showToast(res.ok ? (res.output || 'No updates found') : (res.error || 'Check failed'), res.ok ? 'info' : 'error');
+    if (res.ok && res.output) {
+      const updates = parseSkillTable(res.output);
+      if (updates.length === 0) {
+        await customAlert('All skills are up to date!', 'Skill Updates');
+      } else {
+        let html = '<div style="max-height:400px;overflow-y:auto;">';
+        for (const u of updates) {
+          const statusColor = u.trust === 'up_to_date' ? 'var(--green)' : 'var(--amber)';
+          html += `<div style="padding:8px;border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-weight:600;color:var(--fg);">${escapeHtml(u.name)}</span>
+              <span style="color:${statusColor};font-size:11px;">${escapeHtml(u.trust || u.source)}</span>
+            </div>
+            <div style="font-size:11px;color:var(--fg-muted);margin-top:2px;">${escapeHtml(u.source)} — ${escapeHtml(u.description)}</div>
+          </div>`;
+        }
+        html += '</div>';
+        await showModal({ title: 'Skill Updates', message: html, buttons: [{ text: 'Close', primary: true }] });
+      }
+    } else {
+      await customAlert(res.error || 'Check failed', 'Error');
+    }
   } catch (e) { showToast(e.message, 'error'); }
 }
 async function loadAgentSessions(container, name) {
@@ -1565,6 +1591,29 @@ function escapeHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Parse hermes skills table output (box-drawing chars) into structured data
+function parseSkillTable(output) {
+  const lines = String(output || '').split('\n');
+  const skills = [];
+  const rowPattern = /[│┃]\s*([^│┃\s][^│┃]*?)\s*[│┃]\s*([^│┃]*?)\s*[│┃]\s*(\S+)\s*[│┃]\s*(\S+)\s*[│┃]\s*([^│┃]*?)\s*[│┃]/;
+  for (const line of lines) {
+    if (line.includes('┏') || line.includes('┗') || line.includes('┡') || line.includes('┩') || line.includes('╍')) continue;
+    const match = line.match(rowPattern);
+    if (match) {
+      const name = match[1].trim();
+      if (!name || name === 'Name' || name === '#') continue;
+      skills.push({
+        name,
+        description: match[2].trim(),
+        source: match[3].trim(),
+        trust: match[4].trim(),
+        identifier: match[5].trim(),
+      });
+    }
+  }
+  return skills;
+}
+
 async function loadAgentConfig(container, name) {
   container.innerHTML = `<div class="loading">Loading config for ${name}...</div>`;
 
@@ -1601,8 +1650,7 @@ async function loadAgentConfig(container, name) {
 
     function renderCategory(catKey) {
       const contentEl = document.getElementById('config-content');
-      
-      // Edit mode state
+      if (!contentEl) return;
       const isEditMode = contentEl.dataset.editMode === 'true';
 
       if (catKey === 'raw') {
@@ -2384,10 +2432,33 @@ async function loadSkills(container) {
     contentEl.innerHTML = '<div class="loading">Searching...</div>';
     try {
       const res = await api(`/api/skills/search/${encodeURIComponent(q)}`);
-      if (res.ok) {
-        contentEl.innerHTML = `<div class="card"><div class="card-title">Search Results</div><pre style="font-size:11px;color:var(--fg);max-height:500px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;">${escapeHtml(res.output)}</pre></div>`;
+      if (res.ok && res.output) {
+        const skills = parseSkillTable(res.output);
+        if (skills.length === 0) {
+          contentEl.innerHTML = `<div class="card"><div class="card-title">Search Results</div><div class="stat-row"><span class="stat-label">No skills found for "${escapeHtml(q)}"</span></div></div>`;
+        } else {
+          contentEl.innerHTML = `<div class="card"><div class="card-title">Search Results (${skills.length})</div></div>` +
+            '<div class="card-grid">' + skills.map(s => `
+              <div class="card">
+                <div class="card-title">${escapeHtml(s.name)}</div>
+                <div style="font-size:12px;color:var(--fg-muted);margin:4px 0;">${escapeHtml(s.description)}</div>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;">
+                  <span class="badge" style="font-size:10px;">${escapeHtml(s.source)}</span>
+                  ${s.trust ? `<span class="badge" style="font-size:10px;opacity:0.7;">${escapeHtml(s.trust)}</span>` : ''}
+                </div>
+                <div style="margin-top:8px;display:flex;gap:6px;">
+                  <button class="btn btn-ghost btn-sm" onclick="window.inspectSkill('${escapeHtml(s.identifier || s.name)}')">🔍 Preview</button>
+                  <button class="btn btn-primary btn-sm" onclick="window.installSkill('${escapeHtml(s.identifier || s.name)}')">⬇ Install</button>
+                </div>
+              </div>
+            `).join('') + '</div>';
+        }
+      } else {
+        contentEl.innerHTML = `<div class="card"><div class="card-title">Search Results</div><div class="error-msg">${escapeHtml(res.error || 'Search failed')}</div></div>`;
       }
-    } catch {}
+    } catch (err) {
+      contentEl.innerHTML = `<div class="card"><div class="error-msg">${escapeHtml(err.message)}</div></div>`;
+    }
   });
 
   // Load first page
@@ -3639,21 +3710,21 @@ async function refreshLogs() {
     if (level) o.set("level", level);
     if (search) o.set("search", search);
     const t0 = performance.now();
-    const r = await Q("/api/logs?" + o);
+    const r = await api("/api/logs?" + o);
     const t = Math.round(performance.now() - t0);
     if (r.ok && r.logs) {
       if (r.logs.length === 0) { container.innerHTML = `<div class="empty">No log entries found</div>`; return; }
       container.innerHTML = r.logs.map(e => {
-        const lvl = e.level === "error" ? "error" : e.level === "warn" ? "warning" : e.level === "debug" ? "subtle" : "main";
+        const lvl = e.level === "error" ? "error-msg" : e.level === "warn" ? "warning" : e.level === "debug" ? "subtle" : "";
         const time = e.timestamp ? e.timestamp.replace(/T/, " ").replace(/\.\d+Z?/, "") : "—";
-        const prof = `<span style="color:var(--accent);font-size:10px;">[${e.profile}]</span>`;
-        const src = `<span style="color:var(--fg-subtle);font-size:10px;">[${e.source}]</span>`;
-        return `<div style="padding:3px 0;border-bottom:1px solid var(--border);line-height:1.5;"><div style="font-size:11px;color:var(--fg-muted);">${time} ${prof} ${src}</div><div style="color:var(--${lvl});font-size:13px;">${Z(e.message)}</div></div>`;
+        const prof = `<span style="color:var(--accent);font-size:10px;">[${escapeHtml(e.profile || '')}]</span>`;
+        const src = `<span style="color:var(--fg-subtle);font-size:10px;">[${escapeHtml(e.source || '')}]</span>`;
+        return `<div style="padding:3px 0;border-bottom:1px solid var(--border);line-height:1.5;"><div style="font-size:11px;color:var(--fg-muted);">${time} ${prof} ${src}</div><div class="${lvl}" style="font-size:13px;">${escapeHtml(e.message || '')}</div></div>`;
       }).join("");
       const btn = document.getElementById("logs-load-more");
       if (btn) btn.style.display = r.count && r.count >= 300 ? "block" : "none";
     } else { container.innerHTML = `<div class="error-msg">Error loading logs</div>`; }
-    } catch (e) { container.innerHTML = `<div class="error-msg">" + Z(e.message) + </div>`; }
+  } catch (e) { container.innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`; }
 }
 
 function toggleLogsAutoRefresh() {
