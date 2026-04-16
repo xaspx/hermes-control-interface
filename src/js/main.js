@@ -526,6 +526,10 @@ async function loadHome(container) {
     <div class="card-grid" id="home-bottom" style="margin-top:16px;">
       <div class="card"><div class="card-title">Gateways</div><div class="loading">Loading</div></div>
       <div class="card" id="home-hci-panel"><div class="card-title">HCI</div><div class="loading">Loading</div></div>
+      <div class="card">
+        <div class="card-title">Hermes Auth</div>
+        <div id="home-auth-list"><div class="loading">Loading auth...</div></div>
+      </div>
     </div>
   `;
 
@@ -579,6 +583,9 @@ async function loadHome(container) {
 
     // Load HCI version panel
     loadHCIPanel();
+
+    // Load auth into home
+    loadHomeAuth();
 
   } catch (e) {
     document.getElementById('home-cards').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
@@ -658,6 +665,27 @@ async function hcidoctor() {
       await customAlert(res.error || 'Health check completed', 'Health Check');
     }
   } catch (e) { showToast('Health check failed: ' + e.message, 'error'); }
+}
+
+async function loadHomeAuth() {
+  try {
+    const res = await api('/api/auth/providers');
+    const el = document.getElementById('home-auth-list');
+    if (!el) return;
+    if (res.ok && res.providers) {
+      el.innerHTML = res.providers.map(p => `
+        <div class="stat-row">
+          <span class="stat-label">${p.name}</span>
+          <span class="stat-value ${p.set ? 'status-ok' : 'status-off'}">${p.set ? '● set' : '○ not set'}</span>
+        </div>
+      `).join('');
+    } else {
+      el.innerHTML = '<div class="stat-row"><span class="stat-label">Auth info unavailable</span></div>';
+    }
+  } catch {
+    const el = document.getElementById('home-auth-list');
+    if (el) el.innerHTML = '<div class="stat-row"><span class="stat-label">Auth info unavailable</span></div>';
+  }
 }
 
 async function loadTokenUsage(elementId, days = 7) {
@@ -1018,17 +1046,6 @@ window.checkSkillUpdates = async function(profile) {
   } catch (e) { showToast(e.message, 'error'); }
 }
 async function loadAgentSessions(container, name) {
-  // Load all profiles for agent selector
-  let profiles = [];
-  try {
-    const pRes = await api('/api/profiles');
-    if (pRes.ok) profiles = pRes.profiles || [];
-  } catch {}
-
-  const profileOptions = profiles.map(p =>
-    `<option value="${p.name}" ${p.name === name ? 'selected' : ''}>${p.name}${p.active ? ' (default)' : ''}</option>`
-  ).join('');
-
   container.innerHTML = `
     <div class="card-grid" style="margin-bottom:16px;">
       <div class="card" id="session-stats-${name}">
@@ -1036,9 +1053,8 @@ async function loadAgentSessions(container, name) {
         <div class="loading">Loading stats...</div>
       </div>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap;">
-      ${profiles.length > 1 ? `<select id="session-agent-select" class="modal-input" style="width:auto;margin:0;padding:8px 12px;">${profileOptions}</select>` : ''}
-      <input type="text" id="session-search" class="search-input" placeholder="Search sessions..." style="flex:1;width:auto;min-width:200px;" />
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;">
+      <input type="text" id="session-search" class="search-input" placeholder="Search sessions..." style="flex:1;" />
       <button class="btn btn-ghost" id="session-refresh-btn">↻ Refresh</button>
     </div>
     <div id="sessions-table">
@@ -1046,22 +1062,18 @@ async function loadAgentSessions(container, name) {
     </div>
   `;
 
-  const agentSelect = document.getElementById('session-agent-select');
   const refreshBtn = document.getElementById('session-refresh-btn');
-  let currentAgent = name;
   let currentPage = 0;
   const PAGE_SIZE = 50;
 
-  async function fetchAndRender(agent) {
-    currentAgent = agent;
+  async function fetchAndRender() {
     currentPage = 0;
     const tableEl = document.getElementById('sessions-table');
-    tableEl.innerHTML = '<div class="loading">Loading sessions for ' + escapeHtml(agent) + '...</div>';
-
-    loadSessionStats(agent);
+    tableEl.innerHTML = '<div class="loading">Loading sessions for ' + escapeHtml(name) + '...</div>';
+    loadSessionStats(name);
 
     try {
-      const res = await api(`/api/all-sessions?profile=${encodeURIComponent(agent)}`);
+      const res = await api(`/api/all-sessions?profile=${encodeURIComponent(name)}`);
       if (!res.ok || !res.sessions || res.sessions.length === 0) {
         tableEl.innerHTML = '<div class="card"><div class="card-title">No sessions found</div></div>';
         state.currentSessions = [];
@@ -1118,11 +1130,11 @@ async function loadAgentSessions(container, name) {
                 <td style="font-size:11px;color:var(--fg-muted);">${s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '—'}</td>
                 <td>
                   <div style="display:flex;gap:4px;">
-                    <button class="btn btn-ghost btn-sm" onclick="toggleSessionDetail(this, '${s.id}', '${currentAgent}')" title="View messages">👁</button>
+                    <button class="btn btn-ghost btn-sm" onclick="toggleSessionDetail(this, '${s.id}', '${name}')" title="View messages">👁</button>
                     <button class="btn btn-ghost btn-sm" onclick="resumeSession('${s.id}')" title="Resume in CLI">▶</button>
-                    <button class="btn btn-ghost btn-sm" onclick="renameSession('${s.id}', '${currentAgent}')" title="Rename">✎</button>
+                    <button class="btn btn-ghost btn-sm" onclick="renameSession('${s.id}', '${name}')" title="Rename">✎</button>
                     <button class="btn btn-ghost btn-sm" onclick="exportSession('${s.id}')" title="Export">↓</button>
-                    <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteSession('${s.id}', '${currentAgent}')" title="Delete">×</button>
+                    <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteSession('${s.id}', '${name}')" title="Delete">×</button>
                   </div>
                 </td>
               </tr>
@@ -1159,7 +1171,7 @@ async function loadAgentSessions(container, name) {
   // Agent selector change
 
   // Refresh button
-  refreshBtn?.addEventListener('click', () => fetchAndRender(agentSelect?.value || currentAgent));
+  refreshBtn?.addEventListener('click', () => fetchAndRender());
 
   // Search handler
   document.getElementById('session-search')?.addEventListener('input', (e) => {
@@ -1168,7 +1180,7 @@ async function loadAgentSessions(container, name) {
   });
 
   // Initial load
-  await fetchAndRender(name);
+  await fetchAndRender();
 }
 
 async function toggleSessionDetail(btn, sessionId, profile) {
@@ -2562,14 +2574,21 @@ async function loadMaintenance(container) {
     <div class="card-grid" id="maintenance-grid">
       <div class="card">
         <div class="card-title">Health Check</div>
-        <div class="stat-row"><span class="stat-label">HCI Status</span><span class="stat-value" id="hc-status">—</span></div>
-        <div class="stat-row"><span class="stat-label">Hermes</span><span class="stat-value" id="hc-hermes">—</span></div>
-        <div class="stat-row"><span class="stat-label">Node</span><span class="stat-value" id="hc-node">—</span></div>
-        <div class="stat-row"><span class="stat-label">DB</span><span class="stat-value" id="hc-db">—</span></div>
+        <div id="health-check-results">
+          <div style="font-size:12px;color:var(--fg-muted);margin-bottom:8px;">Test all HCI API endpoints</div>
+        </div>
         <div class="card-actions" style="margin-top:8px;">
-          <button class="btn btn-ghost" onclick="hcidoctor()">Run Health Check</button>
+          <button class="btn btn-ghost" onclick="runHealthCheck()">🔌 Check APIs</button>
           <button class="btn btn-ghost" onclick="hcirestart()">⟲ Restart HCI</button>
           <button class="btn btn-ghost" onclick="hciupdate()">↑ Update HCI</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Doctor</div>
+        <div class="stat-row"><span class="stat-label">Run diagnostics</span></div>
+        <div class="card-actions" style="margin-top:8px;">
+          <button class="btn btn-ghost" onclick="runDoctor()">Run Diagnose</button>
+          <button class="btn btn-ghost" onclick="runDoctor(true)">Auto-fix</button>
         </div>
         <div id="doctor-result" style="margin-top:8px;max-height:500px;overflow-y:auto;"></div>
       </div>
@@ -2631,23 +2650,9 @@ async function loadMaintenance(container) {
 
   // Load version
   try {
-    const [healthRes, apiHealthRes] = await Promise.all([
-      api('/api/system/health'),
-      api('/api/health'),
-    ]);
+    const healthRes = await api('/api/system/health');
     if (healthRes.ok) {
       document.getElementById('update-version').textContent = healthRes.hermes_version || '—';
-      const hcStatus = document.getElementById('hc-status');
-      const hcHermes = document.getElementById('hc-hermes');
-      const hcNode = document.getElementById('hc-node');
-      const hcDb = document.getElementById('hc-db');
-      if (hcStatus) {
-        hcStatus.textContent = apiHealthRes.ok ? '● Healthy' : '○ Error';
-        hcStatus.className = 'stat-value ' + (apiHealthRes.ok ? 'status-ok' : 'status-off');
-      }
-      if (hcHermes) hcHermes.textContent = healthRes.hermes_version || '—';
-      if (hcNode) hcNode.textContent = healthRes.node_version || '—';
-      if (hcDb) hcDb.textContent = healthRes.db_size || '—';
     }
   } catch {}
 }
@@ -2867,6 +2872,37 @@ function renderDoctorOutput(raw) {
     html += `</div>`;
   }
   return html;
+}
+
+async function runHealthCheck() {
+  const el = document.getElementById('health-check-results');
+  if (!el) return;
+  el.innerHTML = '<div class="loading">Testing APIs...</div>';
+  const endpoints = [
+    { name: 'Health', url: '/api/health' },
+    { name: 'System', url: '/api/system/health' },
+    { name: 'Auth Status', url: '/api/auth/status' },
+    { name: 'Profiles', url: '/api/profiles' },
+    { name: 'Sessions', url: '/api/all-sessions?profile=default' },
+  ];
+  const results = [];
+  for (const ep of endpoints) {
+    const start = performance.now();
+    try {
+      const res = await api(ep.url);
+      const ms = Math.round(performance.now() - start);
+      results.push({ name: ep.name, ok: res.ok !== false, ms, error: res.error });
+    } catch (e) {
+      results.push({ name: ep.name, ok: false, ms: Math.round(performance.now() - start), error: e.message });
+    }
+  }
+  const allOk = results.every(r => r.ok);
+  el.innerHTML = results.map(r => `
+    <div class="stat-row">
+      <span class="stat-label">${r.name}</span>
+      <span class="stat-value ${r.ok ? 'status-ok' : 'status-off'}">${r.ok ? '● OK' : '○ FAIL'} <span style="font-size:10px;opacity:0.6;">${r.ms}ms</span></span>
+    </div>
+  `).join('') + `<div style="margin-top:8px;font-size:11px;color:var(--fg-muted);">${allOk ? 'All endpoints healthy' : 'Some endpoints failed'}</div>`;
 }
 
 async function runDoctor(fix = false) {
@@ -3759,6 +3795,8 @@ window.importBackup = importBackup;
 window.hcirestart = hcirestart;
 window.hciupdate = hciupdate;
 window.hcidoctor = hcidoctor;
+window.runHealthCheck = runHealthCheck;
+window.runDoctor = runDoctor;
 window.openTerminalPanel = openTerminalPanel;
 window.loadHome = loadHome;
 window.loadAgentDetail = loadAgentDetail;
