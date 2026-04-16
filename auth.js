@@ -11,33 +11,53 @@ const USERS_FILE = path.join(HERMES_HOME, 'hci-users.json');
 const AUDIT_FILE = path.join(HERMES_HOME, 'hci-audit.log');
 const SALT_ROUNDS = 10;
 
-// ── Permission Constants ──
+// ── Permission Constants (v2 — 28 perms) ──
 const PERMISSIONS = [
+  // Sessions
   'sessions.view',
   'sessions.messages',
+  'sessions.delete',
+  // Chat
+  'chat.use',
+  'chat.manage',
+  // Logs & Usage
   'logs.view',
   'usage.view',
+  'usage.export',
+  // Gateway
+  'gateway.view',
   'gateway.control',
+  // Config
+  'config.view',
   'config.edit',
+  // Secrets
   'secrets.view',
   'secrets.reveal',
   'secrets.edit',
+  // Skills
   'skills.browse',
   'skills.install',
+  // Cron
   'cron.view',
   'cron.manage',
+  // Files
   'files.read',
   'files.write',
+  // Terminal
   'terminal',
+  // Users
+  'users.view',
   'users.manage',
-  'hci.update',
-  'backup',
-  'doctor',
+  // System
+  'system.update',
+  'system.backup',
+  'system.doctor',
+  'system.restart',
 ];
 
 // Presets
 const VIEW_PERMS = PERMISSIONS.filter(p =>
-  p.endsWith('.view') || p === 'skills.browse' || p === 'files.read' || p === 'cron.view'
+  p.endsWith('.view') || ['chat.use', 'skills.browse', 'files.read', 'cron.view', 'sessions.view', 'sessions.messages'].includes(p)
 );
 const PRESET_PERMISSIONS = {
   admin: Object.fromEntries(PERMISSIONS.map(p => [p, true])),

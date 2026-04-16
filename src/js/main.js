@@ -3241,7 +3241,7 @@ async function showCreateUser() {
           <div id="perm-custom-list" style="display:none;">
             <div style="font-size:11px;color:var(--fg-muted);margin-bottom:6px;">Select permissions:</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px;" id="perm-checkboxes">
-              ${['sessions.view','sessions.messages','logs.view','usage.view','gateway.control','config.edit','secrets.view','secrets.reveal','secrets.edit','skills.browse','skills.install','cron.view','cron.manage','files.read','files.write','terminal','users.manage','hci.update','backup','doctor'].map(p =>
+              ${['sessions.view','sessions.messages','sessions.delete','chat.use','chat.manage','logs.view','usage.view','usage.export','gateway.view','gateway.control','config.view','config.edit','secrets.view','secrets.reveal','secrets.edit','skills.browse','skills.install','cron.view','cron.manage','files.read','files.write','terminal','users.view','users.manage','system.update','system.backup','system.doctor','system.restart'].map(p =>
                 `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:2px 0;"><input type="checkbox" name="perm" value="${p}" /> ${p}</label>`
               ).join('')}
             </div>
@@ -3317,30 +3317,149 @@ async function showEditUser(username) {
   const user = usersRes.users?.find(u => u.username === username);
   if (!user) return showToast('User not found', 'error');
 
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  // Permission groups from PERMISSIONS.md v2
+  const permGroups = [
+    { label: 'Sessions', perms: ['sessions.view', 'sessions.messages', 'sessions.delete'] },
+    { label: 'Chat', perms: ['chat.use', 'chat.manage'] },
+    { label: 'Logs & Usage', perms: ['logs.view', 'usage.view', 'usage.export'] },
+    { label: 'Gateway', perms: ['gateway.view', 'gateway.control'] },
+    { label: 'Config', perms: ['config.view', 'config.edit'] },
+    { label: 'Secrets', perms: ['secrets.view', 'secrets.reveal', 'secrets.edit'] },
+    { label: 'Skills', perms: ['skills.browse', 'skills.install'] },
+    { label: 'Cron', perms: ['cron.view', 'cron.manage'] },
+    { label: 'Files', perms: ['files.read', 'files.write'] },
+    { label: 'Terminal', perms: ['terminal'] },
+    { label: 'Users', perms: ['users.view', 'users.manage'] },
+    { label: 'System', perms: ['system.update', 'system.backup', 'system.doctor', 'system.restart'] },
+  ];
+
+  const userPerms = user.permissions || {};
+  const isCustom = user.role === 'custom';
+
+  overlay.innerHTML = `
+    <div class="modal-card" style="max-width:600px;max-height:85vh;overflow-y:auto;">
+      <div class="modal-title">Edit User: ${escapeHtml(username)}</div>
+      <div style="font-size:11px;color:var(--fg-muted);margin-bottom:12px;">
+        Created: ${user.created_at ? new Date(user.created_at).toLocaleString() : '—'} ·
+        Last login: ${user.last_login ? new Date(user.last_login).toLocaleString() : 'never'}
+      </div>
+      <form id="edit-user-form">
+        <div style="margin-bottom:12px;">
+          <label style="font-size:11px;color:var(--fg-muted);display:block;margin-bottom:6px;">Role</label>
+          <div style="display:flex;gap:6px;margin-bottom:8px;">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="applyPreset('admin', this)">Admin</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="applyPreset('viewer', this)">Viewer</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="applyPreset('custom', this)">Custom</button>
+          </div>
+          <input type="hidden" name="role" id="edit-user-role" value="${user.role}" />
+          <div id="edit-perm-custom-list" style="${isCustom ? '' : 'display:none;'}">
+            <div style="font-size:11px;color:var(--fg-muted);margin-bottom:6px;">Permissions:</div>
+            <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);padding:8px;background:var(--bg-input);">
+              ${permGroups.map(g => `
+                <div style="margin-bottom:8px;">
+                  <div style="font-size:10px;font-weight:600;color:var(--gold,#ffac02);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">${g.label}</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;font-size:11px;">
+                    ${g.perms.map(p => `
+                      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:2px 4px;border-radius:3px;" onmouseover="this.style.background='var(--bg-panel-hover)'" onmouseout="this.style.background='transparent'">
+                        <input type="checkbox" name="perm" value="${p}" ${userPerms[p] ? 'checked' : ''} /> ${p}
+                      </label>
+                    `).join('')}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        <div style="margin-bottom:12px;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="showResetPassword('${escapeHtml(username)}')" style="color:var(--coral,#ff6b6b);">🔑 Reset Password</button>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Apply preset helper — updates checkboxes based on preset
+  window.applyPreset = function(role, btn) {
+    document.getElementById('edit-user-role').value = role;
+    const customList = document.getElementById('edit-perm-custom-list');
+    const checkboxes = customList.querySelectorAll('input[name="perm"]');
+    if (role === 'admin') {
+      checkboxes.forEach(cb => cb.checked = true);
+      customList.style.display = 'none';
+    } else if (role === 'viewer') {
+      const viewerPerms = ['sessions.view','sessions.messages','chat.use','logs.view','usage.view','skills.browse','files.read'];
+      checkboxes.forEach(cb => cb.checked = viewerPerms.includes(cb.value));
+      customList.style.display = 'none';
+    } else {
+      customList.style.display = 'block';
+    }
+    // Highlight active button
+    customList.parentElement.querySelectorAll('[onclick^="applyPreset"]').forEach(b => b.classList.remove('btn-primary'));
+    btn.classList.add('btn-primary');
+  };
+
+  // Init: highlight the current role button
+  const currentRoleBtn = overlay.querySelector(`[onclick="applyPreset('${user.role}', this)"]`);
+  if (currentRoleBtn) currentRoleBtn.classList.add('btn-primary');
+
+  document.getElementById('edit-user-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const role = document.getElementById('edit-user-role').value;
+    let permissions = null;
+    if (role === 'custom') {
+      const checked = overlay.querySelectorAll('input[name="perm"]:checked');
+      permissions = {};
+      checked.forEach(cb => { permissions[cb.value] = true; });
+    }
+    try {
+      const csrfToken = state.csrfToken || '';
+      const res = await api(`/api/users/${encodeURIComponent(username)}`, {
+        method: 'PUT',
+        headers: { 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ role, permissions }),
+      });
+      if (res.ok) {
+        showToast(`User ${username} updated`, 'success');
+        overlay.remove();
+        loadUsers();
+      } else {
+        showToast(`Failed: ${res.error}`, 'error');
+      }
+    } catch (e) { showToast(`Failed: ${e.message}`, 'error'); }
+  });
+}
+
+// Reset password sub-modal
+async function showResetPassword(username) {
   const result = await showModal({
-    title: `Edit User: ${username}`,
-    message: `Role: ${user.role} · ${user.permissions ? Object.values(user.permissions).filter(Boolean).length : 0} permissions`,
-    inputs: [
-      { placeholder: 'Role (admin/viewer/custom)', value: user.role },
-    ],
+    title: `Reset Password: ${username}`,
+    message: 'Enter a new password for this user.',
+    inputs: [{ placeholder: 'New password (min 8 chars)', name: 'password', type: 'password' }],
     buttons: [
       { text: 'Cancel', value: false },
-      { text: 'Save', value: true, primary: true },
+      { text: 'Reset Password', value: true, primary: true },
     ],
   });
-  if (!result?.action) return;
-  const role = result.inputs[0]?.trim() || user.role;
-  if (!['admin', 'viewer', 'custom'].includes(role)) return showToast('Invalid role', 'error');
+  if (!result?.action || !result.inputs?.[0]) return;
+  const newPw = result.inputs[0];
+  if (newPw.length < 8) return showToast('Password must be at least 8 chars', 'error');
   try {
     const csrfToken = state.csrfToken || '';
-    const res = await api(`/api/users/${encodeURIComponent(username)}`, {
-      method: 'PUT',
-      headers: { 'X-CSRF-Token': csrfToken },
-      body: JSON.stringify({ role }),
+    const res = await api(`/api/users/${encodeURIComponent(username)}/reset-password`, {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_password: newPw }),
     });
     if (res.ok) {
-      showToast(`User ${username} updated to ${role}`, 'success');
-      loadUsers();
+      showToast(`Password reset for ${username}`, 'success');
     } else {
       showToast(`Failed: ${res.error}`, 'error');
     }
