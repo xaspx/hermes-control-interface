@@ -887,6 +887,17 @@ window.checkSkillUpdates = async function(profile) {
   } catch (e) { showToast(e.message, 'error'); }
 }
 async function loadAgentSessions(container, name) {
+  // Load all profiles for agent selector
+  let profiles = [];
+  try {
+    const pRes = await api('/api/profiles');
+    if (pRes.ok) profiles = pRes.profiles || [];
+  } catch {}
+
+  const profileOptions = profiles.map(p =>
+    `<option value="${p.name}" ${p.name === name ? 'selected' : ''}>${p.name}${p.active ? ' (default)' : ''}</option>`
+  ).join('');
+
   container.innerHTML = `
     <div class="card-grid" style="margin-bottom:16px;">
       <div class="card" id="session-stats-${name}">
@@ -894,94 +905,199 @@ async function loadAgentSessions(container, name) {
         <div class="loading">Loading stats...</div>
       </div>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;">
-      <input type="text" id="session-search" class="search-input" placeholder="Search sessions..." style="flex:1;width:auto;" />
-      <button class="btn btn-ghost" onclick="loadAgentSessions(document.getElementById('agent-tab-content'), '${name}')">↻ Refresh</button>
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap;">
+      ${profiles.length > 1 ? `<select id="session-agent-select" class="modal-input" style="width:auto;margin:0;padding:8px 12px;">${profileOptions}</select>` : ''}
+      <input type="text" id="session-search" class="search-input" placeholder="Search sessions..." style="flex:1;width:auto;min-width:200px;" />
+      <button class="btn btn-ghost" id="session-refresh-btn">↻ Refresh</button>
     </div>
     <div id="sessions-table">
-      <div class="loading">Loading sessions for ${name}...</div>
+      <div class="loading">Loading sessions...</div>
     </div>
+    <div id="session-detail-panel" style="display:none;margin-top:12px;"></div>
   `;
 
-  // Load session stats
-  loadSessionStats(name);
+  const agentSelect = document.getElementById('session-agent-select');
+  const refreshBtn = document.getElementById('session-refresh-btn');
+  let currentAgent = name;
+  let currentPage = 0;
+  const PAGE_SIZE = 50;
 
-  try {
-    const res = await api(`/api/all-sessions?profile=${encodeURIComponent(name)}`);
+  async function fetchAndRender(agent) {
+    currentAgent = agent;
+    currentPage = 0;
     const tableEl = document.getElementById('sessions-table');
+    tableEl.innerHTML = '<div class="loading">Loading sessions for ' + escapeHtml(agent) + '...</div>';
 
-    if (!res.ok || !res.sessions || res.sessions.length === 0) {
-      tableEl.innerHTML = '<div class="card"><div class="card-title">No sessions found</div></div>';
-      state.currentSessions = [];
+    loadSessionStats(agent);
+
+    try {
+      const res = await api(`/api/all-sessions?profile=${encodeURIComponent(agent)}`);
+      if (!res.ok || !res.sessions || res.sessions.length === 0) {
+        tableEl.innerHTML = '<div class="card"><div class="card-title">No sessions found</div></div>';
+        state.currentSessions = [];
+        return;
+      }
+      state.currentSessions = res.sessions;
+      renderSessions('');
+    } catch (e) {
+      tableEl.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+    }
+  }
+
+  function renderSessions(filter = '') {
+    const sessions = state.currentSessions || [];
+    const filtered = filter
+      ? sessions.filter(s =>
+          (s.title || '').toLowerCase().includes(filter) ||
+          (s.id || '').toLowerCase().includes(filter) ||
+          (s.source || '').toLowerCase().includes(filter)
+        )
+      : sessions;
+
+    const tableEl = document.getElementById('sessions-table');
+    if (filtered.length === 0) {
+      tableEl.innerHTML = '<div class="card"><div class="card-title">No matching sessions</div></div>';
       return;
     }
 
-    const sessions = res.sessions;
-    state.currentSessions = sessions;
+    const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+    const page = Math.min(currentPage, totalPages - 1);
+    const start = page * PAGE_SIZE;
+    const pageItems = filtered.slice(start, start + PAGE_SIZE);
 
-    function renderSessions(filter = '') {
-      const filtered = filter
-        ? sessions.filter(s =>
-            (s.title || '').toLowerCase().includes(filter) ||
-            (s.id || '').toLowerCase().includes(filter) ||
-            (s.source || '').toLowerCase().includes(filter)
-          )
-        : sessions;
-
-      if (filtered.length === 0) {
-        tableEl.innerHTML = '<div class="card"><div class="card-title">No matching sessions</div></div>';
-        return;
-      }
-
-      tableEl.innerHTML = `
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Session ID</th>
-                <th>Title</th>
-                <th>Source</th>
-                <th>Messages</th>
-                <th>Updated</th>
-                <th>Actions</th>
+    tableEl.innerHTML = `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Session ID</th>
+              <th>Title</th>
+              <th>Source</th>
+              <th>Messages</th>
+              <th>Updated</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pageItems.map(s => `
+              <tr class="session-row" data-sid="${s.id}" style="cursor:pointer;">
+                <td class="mono" style="font-size:11px;">${s.id || '—'}</td>
+                <td>${escapeHtml(s.title || 'Untitled')}</td>
+                <td><span class="badge">${s.source || '—'}</span></td>
+                <td>${s.messageCount ?? s.message_count ?? '—'}</td>
+                <td style="font-size:11px;color:var(--fg-muted);">${s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '—'}</td>
+                <td>
+                  <div style="display:flex;gap:4px;" onclick="event.stopPropagation()">
+                    <button class="btn btn-ghost btn-sm" onclick="resumeSession('${s.id}')" title="Resume in CLI">▶</button>
+                    <button class="btn btn-ghost btn-sm" onclick="renameSession('${s.id}', '${currentAgent}')" title="Rename">✎</button>
+                    <button class="btn btn-ghost btn-sm" onclick="exportSession('${s.id}')" title="Export">↓</button>
+                    <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteSession('${s.id}', '${currentAgent}')" title="Delete">×</button>
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              ${filtered.slice(0, 100).map(s => `
-                <tr>
-                  <td class="mono" style="font-size:11px;">${s.id || '—'}</td>
-                  <td>${s.title || 'Untitled'}</td>
-                  <td><span class="badge">${s.source || '—'}</span></td>
-                  <td>${s.message_count ?? '—'}</td>
-                  <td style="font-size:11px;color:var(--fg-muted);">${s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '—'}</td>
-                  <td>
-                    <div style="display:flex;gap:4px;">
-                      <button class="btn btn-ghost btn-sm" onclick="resumeSession('${s.id}')" title="Resume in CLI">▶</button>
-                      <button class="btn btn-ghost btn-sm" onclick="renameSession('${s.id}', '${name}')" title="Rename">✎</button>
-                      <button class="btn btn-ghost btn-sm" onclick="exportSession('${s.id}')" title="Export">↓</button>
-                      <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteSession('${s.id}', '${name}')" title="Delete">×</button>
-                    </div>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+        <div style="font-size:11px;color:var(--fg-muted);">
+          ${start + 1}–${Math.min(start + PAGE_SIZE, filtered.length)} of ${filtered.length} sessions
         </div>
-        <div style="margin-top:8px;font-size:11px;color:var(--fg-muted);">
-          Showing ${Math.min(filtered.length, 100)} of ${filtered.length} sessions
-        </div>
-      `;
-    }
+        ${totalPages > 1 ? `
+          <div style="display:flex;gap:4px;">
+            <button class="btn btn-ghost btn-sm" ${page <= 0 ? 'disabled style="opacity:0.3;"' : ''} id="sessions-prev">← Prev</button>
+            <span style="font-size:11px;color:var(--fg-muted);padding:4px 8px;">${page + 1} / ${totalPages}</span>
+            <button class="btn btn-ghost btn-sm" ${page >= totalPages - 1 ? 'disabled style="opacity:0.3;"' : ''} id="sessions-next">Next →</button>
+          </div>
+        ` : ''}
+      </div>
+    `;
 
-    renderSessions();
-
-    // Search handler
-    document.getElementById('session-search')?.addEventListener('input', (e) => {
-      renderSessions(e.target.value.toLowerCase());
+    // Pagination handlers
+    document.getElementById('sessions-prev')?.addEventListener('click', () => {
+      if (currentPage > 0) { currentPage--; renderSessions(document.getElementById('session-search')?.value?.toLowerCase() || ''); }
+    });
+    document.getElementById('sessions-next')?.addEventListener('click', () => {
+      if (currentPage < totalPages - 1) { currentPage++; renderSessions(document.getElementById('session-search')?.value?.toLowerCase() || ''); }
     });
 
+    // Row click → expand session detail
+    tableEl.querySelectorAll('.session-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const sid = row.dataset.sid;
+        showSessionDetail(sid, currentAgent);
+      });
+    });
+  }
+
+  // Agent selector change
+  agentSelect?.addEventListener('change', () => fetchAndRender(agentSelect.value));
+
+  // Refresh button
+  refreshBtn?.addEventListener('click', () => fetchAndRender(agentSelect?.value || currentAgent));
+
+  // Search handler
+  document.getElementById('session-search')?.addEventListener('input', (e) => {
+    currentPage = 0;
+    renderSessions(e.target.value.toLowerCase());
+  });
+
+  // Initial load
+  await fetchAndRender(name);
+}
+
+async function showSessionDetail(sessionId, profile) {
+  const panel = document.getElementById('session-detail-panel');
+  if (!panel) return;
+  panel.style.display = 'block';
+  panel.innerHTML = '<div class="loading">Loading messages...</div>';
+
+  try {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
+    if (!r.ok) { panel.innerHTML = '<div class="error-msg">Failed to load messages</div>'; return; }
+    const data = await r.json();
+    if (!data.messages || data.messages.length === 0) {
+      panel.innerHTML = '<div class="card"><div class="card-title">Session ' + escapeHtml(sessionId) + '</div><div style="color:var(--fg-muted);padding:12px 0;">No messages in this session</div></div>';
+      return;
+    }
+
+    let html = `<div class="card" style="max-height:500px;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div class="card-title" style="margin:0;">${escapeHtml(data.title || 'Session ' + sessionId)}</div>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('session-detail-panel').style.display='none'">✕ Close</button>
+      </div>`;
+
+    for (const m of data.messages) {
+      const roleColors = {
+        user: { bg: 'var(--accent-dim)', border: 'var(--accent)' },
+        assistant: { bg: 'var(--bg-card)', border: 'var(--green, #4ade80)' },
+        tool: { bg: 'rgba(251,146,60,0.08)', border: '#fb923c' },
+        tool_result: { bg: 'rgba(251,146,60,0.08)', border: '#fb923c' },
+        system: { bg: 'rgba(156,163,175,0.08)', border: '#9ca3af' },
+      };
+      const rc = roleColors[m.role] || roleColors.system;
+      const ts = m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      let content = m.content || '';
+      // Strip banners
+      content = content.replace(/Resume this session with:.*$/gm, '');
+      content = content.replace(/^Session:\s*\d+.*$/gm, '');
+      content = content.replace(/^Duration:.*$/gm, '');
+      content = content.replace(/^-{10,}$/gm, '');
+      content = content.trim();
+
+      html += `<div style="margin-bottom:6px;padding:8px 10px;border-radius:6px;background:${rc.bg};border-left:3px solid ${rc.border};">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:10px;font-weight:600;text-transform:uppercase;color:var(--fg-muted);">${m.role || 'unknown'}</span>
+          ${ts ? `<span style="font-size:10px;color:var(--fg-subtle);">${ts}</span>` : ''}
+        </div>
+        <div style="font-size:12px;line-height:1.5;color:var(--fg);white-space:pre-wrap;word-break:break-word;">${escapeHtml(content).substring(0, 2000)}${content.length > 2000 ? '\n... (truncated)' : ''}</div>
+      </div>`;
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
-    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+    panel.innerHTML = '<div class="error-msg">' + escapeHtml(e.message) + '</div>';
   }
 }
 
