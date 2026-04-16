@@ -3576,22 +3576,26 @@ function init() {
     const n = state.notifications.find(n => n.id === id);
     if (n) n.dismissed = true;
     updateNotifBadge();
-    try { await api('/api/notifications/read', { method: 'POST', body: JSON.stringify({ id }) }); } catch {}
-  };
-
-  window.dismissNotifItem = async function(id) {
-    state.notifications = state.notifications.filter(n => n.id !== id);
-    updateNotifBadge();
-    renderNotifications(5);
     try { await api('/api/notifications/dismiss', { method: 'POST', body: JSON.stringify({ id }) }); } catch {}
   };
 
-  document.getElementById('notif-clear')?.addEventListener('click', async () => {
-    if (!await customConfirm('Clear all notifications?', 'Notifications')) return;
-    await api('/api/notifications/clear', { method: 'POST' });
-    state.notifications = [];
+  window.dismissNotifItem = async function(id) {
+    const idx = state.notifications.findIndex(n => n.id === id);
+    if (idx >= 0) { state.notifications[idx].dismissed = true; updateNotifBadge(); }
+    try { await api('/api/notifications/dismiss', { method: 'POST', body: JSON.stringify({ id }) }); } catch {}
+    renderNotifications(5);
+  };
+
+  window.markAllNotifRead = async function() {
+    state.notifications.forEach(n => n.dismissed = true);
     updateNotifBadge();
-    document.getElementById('notif-list').innerHTML = '<div class="notif-empty">No notifications</div>';
+    try { await api('/api/notifications/clear', { method: 'POST' }); } catch {}
+    renderNotifications(5);
+  };
+
+  document.getElementById('notif-clear')?.addEventListener('click', async () => {
+    // Mark all as read (dismissed but keep in list)
+    await window.markAllNotifRead();
   });
 
   // Close dropdowns on outside click
