@@ -3024,10 +3024,64 @@ app.get('/api/usage/:days', requireAuth, async (req, res) => {
   try {
     const days = Math.min(parseInt(req.params.days || '7', 10), 90);
     const profile = sanitizeProfileName(req.query.profile) || undefined;
-    const cmd = profile ? `hermes --profile ${profile} insights --days ${days}` : `hermes insights --days ${days}`;
-    const raw = await shell(`${cmd} 2>&1`, '60s');
-    const parsed = parseInsights(raw);
-    res.json({ ok: true, ...parsed, raw });
+
+    if (profile) {
+      // Single profile
+      const raw = await shell(`hermes --profile ${profile} insights --days ${days} 2>&1`, '60s');
+      const parsed = parseInsights(raw);
+      return res.json({ ok: true, ...parsed, raw });
+    }
+
+    // All profiles — aggregate
+    const profilesRaw = await shell('hermes profile list 2>&1', '15s');
+    const profiles = parseHermesProfileList(profilesRaw);
+    const profileNames = profiles.map(p => p.name);
+
+    if (profileNames.length === 0) {
+      const raw = await shell(`hermes insights --days ${days} 2>&1`, '60s');
+      return res.json({ ok: true, ...parseInsights(raw), raw });
+    }
+
+    // Fetch insights for all profiles in parallel
+    const results = await Promise.allSettled(
+      profileNames.map(p => shell(`hermes --profile ${p} insights --days ${days} 2>&1`, '60s').then(r => ({ profile: p, parsed: parseInsights(r) })))
+    );
+
+    // Aggregate
+    const agg = { sessions: 0, messages: 0, toolCalls: 0, userMessages: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: '$0.00', activeTime: '', avgSession: '', period: `${days} days (all profiles)`, models: [], platforms: [], topTools: [] };
+    const modelMap = {};
+    const platformMap = {};
+    const toolMap = {};
+    let totalCost = 0;
+
+    for (const r of results) {
+      if (r.status !== 'fulfilled') continue;
+      const p = r.value.parsed;
+      agg.sessions += p.sessions || 0;
+      agg.messages += p.messages || 0;
+      agg.toolCalls += p.toolCalls || 0;
+      agg.inputTokens += p.inputTokens || 0;
+      agg.outputTokens += p.outputTokens || 0;
+      agg.totalTokens += p.totalTokens || 0;
+      const costNum = parseFloat((p.cost || '$0').replace(/[$,]/g, '')) || 0;
+      totalCost += costNum;
+      for (const m of (p.models || [])) {
+        if (!modelMap[m.name]) modelMap[m.name] = { name: m.name, sessions: 0, tokens: 0 };
+        modelMap[m.name].sessions += m.sessions || 0;
+        modelMap[m.name].tokens += parseInt((m.tokens || '0').replace(/,/g, ''), 10) || 0;
+      }
+      for (const pl of (p.platforms || [])) {
+        if (!platformMap[pl.name]) platformMap[pl.name] = { name: pl.name, sessions: 0, tokens: 0 };
+        platformMap[pl.name].sessions += pl.sessions || 0;
+        platformMap[pl.name].tokens += parseInt((pl.tokens || '0').replace(/,/g, ''), 10) || 0;
+      }
+    }
+
+    agg.cost = '$' + totalCost.toFixed(2);
+    agg.models = Object.values(modelMap).sort((a, b) => b.tokens - a.tokens);
+    agg.platforms = Object.values(platformMap).sort((a, b) => b.sessions - a.sessions);
+
+    res.json({ ok: true, ...agg });
   } catch (e) {
     res.json({ ok: false, error: e.message });
   }

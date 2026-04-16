@@ -524,7 +524,7 @@ async function loadHome(container) {
       <div class="card"><div class="card-title">Agent Overview</div><div class="loading">Loading</div></div>
     </div>
     <div class="card-grid" id="home-bottom" style="margin-top:16px;">
-      <div class="card"><div class="card-title">Gateways</div><div class="loading">Loading</div></div>
+      <div class="card" id="home-gateways"><div class="card-title">Gateways</div><div class="loading">Loading</div></div>
       <div class="card" id="home-hci-panel"><div class="card-title">HCI</div><div class="loading">Loading</div></div>
       <div class="card">
         <div class="card-title">Hermes Auth</div>
@@ -565,21 +565,17 @@ async function loadHome(container) {
       `;
     }
 
-    // Row 2: Gateways + Token Usage
-    const bottomEl = document.getElementById('home-bottom');
+    // Row 2: Gateways (update only this card, don't replace entire grid)
     const profiles = profilesRes.ok && profilesRes.profiles ? profilesRes.profiles : [];
     const gwHtml = profiles.map(p => {
       const cls = p.gateway === 'running' ? 'status-ok' : 'status-off';
       const txt = p.gateway === 'running' ? '● running' : '○ stopped';
       return `<div class="stat-row"><span class="stat-label">${p.name}</span><span class="stat-value ${cls}">${txt}</span></div>`;
     }).join('');
-
-    bottomEl.innerHTML = `
-      <div class="card">
-        <div class="card-title">Gateways</div>
-        ${gwHtml || '<div class="stat-row"><span class="stat-label">No profiles</span></div>'}
-      </div>
-    `;
+    const gwCard = document.getElementById('home-gateways');
+    if (gwCard) {
+      gwCard.innerHTML = `<div class="card-title">Gateways</div>${gwHtml || '<div class="stat-row"><span class="stat-label">No profiles</span></div>'}`;
+    }
 
     // Load HCI version panel
     loadHCIPanel();
@@ -1647,6 +1643,9 @@ async function loadAgentConfig(container, name) {
       { key: 'mcp', label: 'MCP Servers', icon: '🔌' },
     ];
 
+    // Store in state for window functions
+    state._config = { config, rawYaml, categories, profile: name };
+
     container.innerHTML = `
       <div style="margin-bottom:12px;">
         <div class="tabs" id="config-tabs" style="margin:0;">
@@ -1808,55 +1807,16 @@ async function loadAgentConfig(container, name) {
       `;
     }
 
-    renderCategory(categories[0].key);
+    // Initial render
+    renderConfigCategory(categories[0].key);
 
     // Tab switching
-    document.getElementById('config-tabs')?.addEventListener('click', async (e) => {
+    document.getElementById('config-tabs')?.addEventListener('click', (e) => {
       const tab = e.target.closest('.tab');
       if (!tab) return;
       document.querySelectorAll('#config-tabs .tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
-      
-      if (tab.dataset.cat === 'secrets') {
-        // Load secrets tab dynamically
-        const keysRes = await api(`/api/keys/${name}`);
-        const keysData = keysRes.ok ? keysRes.keys : [];
-        
-        let secretsHtml = `
-          <div class="card">
-            <div class="card-title">Environment Secrets</div>
-        `;
-        
-        if (keysData.length === 0) {
-          secretsHtml += `<div class="stat-row"><span class="stat-label">No secrets configured</span></div>`;
-        } else {
-          secretsHtml += `<table class="data-table"><thead><tr><th>Key</th><th>Value</th><th>Actions</th></tr></thead><tbody>`;
-          keysData.forEach(k => {
-            secretsHtml += `
-              <tr>
-                <td class="mono" style="font-size:11px;">${escapeHtml(k.name)}</td>
-                <td><span class="mono" style="font-size:11px;">${k.masked}</span></td>
-                <td style="display:flex;gap:4px;">
-                  <button class="btn btn-ghost btn-sm" onclick="revealSecret('${k.name}','${name}')">👁</button>
-                  <button class="btn btn-ghost btn-sm" onclick="editSecret('${k.name}','${name}')">✎</button>
-                  <button class="btn btn-danger btn-sm" onclick="deleteSecret('${k.name}','${name}')">×</button>
-                </td>
-              </tr>
-            `;
-          });
-          secretsHtml += `</tbody></table>`;
-        }
-
-        secretsHtml += `
-          </div>
-          <div style="margin-top:12px;">
-            <button class="btn btn-primary" onclick="enableEdit('secrets')">✏️ Edit</button>
-          </div>
-        `;
-        contentEl.innerHTML = secretsHtml;
-      } else {
-        renderCategory(tab.dataset.cat);
-      }
+      renderConfigCategory(tab.dataset.cat);
     });
 
   } catch (e) {
@@ -3894,7 +3854,7 @@ window.enableEdit = function(type) {
   const contentEl = document.getElementById('config-content');
   if (contentEl) {
     contentEl.dataset.editMode = 'true';
-    renderCategory(type === 'secrets' ? 'secrets' : (contentEl.querySelector('.tab.active')?.dataset.cat || categories[0].key));
+    renderConfigCategory(type === 'secrets' ? 'secrets' : (contentEl.querySelector('.tab.active')?.dataset.cat || state._config?.categories?.[0]?.key || 'model'));
   }
 };
 
@@ -3902,9 +3862,96 @@ window.cancelEdit = function(type) {
   const contentEl = document.getElementById('config-content');
   if (contentEl) {
     contentEl.dataset.editMode = 'false';
-    renderCategory(type === 'secrets' ? 'secrets' : (contentEl.querySelector('.tab.active')?.dataset.cat || categories[0].key));
+    renderConfigCategory(type === 'secrets' ? 'secrets' : (contentEl.querySelector('.tab.active')?.dataset.cat || state._config?.categories?.[0]?.key || 'model'));
   }
 };
+
+// Render config category (global version for window functions)
+function renderConfigCategory(catKey) {
+  const contentEl = document.getElementById('config-content');
+  if (!contentEl || !state._config) return;
+  const isEditMode = contentEl.dataset.editMode === 'true';
+  const { config, rawYaml, profile } = state._config;
+
+  if (catKey === 'raw') {
+    contentEl.innerHTML = `<div class="card"><div class="card-title">Raw Config</div><pre style="font-size:11px;white-space:pre-wrap;max-height:500px;overflow-y:auto;color:var(--fg-muted);">${escapeHtml(rawYaml || JSON.stringify(config, null, 2))}</pre></div>`;
+    return;
+  }
+
+  if (catKey === 'secrets') {
+    loadSecretsTab(contentEl, profile, isEditMode);
+    return;
+  }
+
+  const catConfig = config[catKey];
+  if (!catConfig || (typeof catConfig === 'object' && Object.keys(catConfig).length === 0)) {
+    contentEl.innerHTML = `<div class="card"><div class="card-title">${catKey}</div><div class="stat-row"><span class="stat-label">No settings configured</span></div></div>`;
+    return;
+  }
+
+  if (isEditMode) {
+    const yamlStr = typeof catConfig === 'object' ? JSON.stringify(catConfig, null, 2) : String(catConfig);
+    contentEl.innerHTML = `
+      <div class="card">
+        <div class="card-title">${catKey} (editing)</div>
+        <textarea id="config-edit-textarea" style="width:100%;min-height:300px;font-family:var(--font);font-size:12px;background:var(--bg-input);color:var(--fg);border:1px solid var(--border);border-radius:var(--radius);padding:12px;resize:vertical;" spellcheck="false">${escapeHtml(yamlStr)}</textarea>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn btn-primary" onclick="window.saveConfig('${profile}','${catKey}')">💾 Save</button>
+          <button class="btn btn-ghost" onclick="window.cancelEdit('${catKey}')">↺ Revert</button>
+        </div>
+      </div>
+    `;
+  } else {
+    let rows = '';
+    if (typeof catConfig === 'object') {
+      rows = Object.entries(catConfig).map(([k, v]) => {
+        const display = typeof v === 'object' ? JSON.stringify(v) : String(v);
+        return `<div class="stat-row"><span class="stat-label">${escapeHtml(k)}</span><span class="stat-value" style="max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(display)}">${escapeHtml(display)}</span></div>`;
+      }).join('');
+    }
+    contentEl.innerHTML = `
+      <div class="card">
+        <div class="card-title">${catKey}</div>
+        ${rows}
+        <div style="margin-top:12px;">
+          <button class="btn btn-primary" onclick="window.enableEdit('${catKey}')">✏️ Edit</button>
+        </div>
+      </div>
+    `;
+  }
+}
+
+async function loadSecretsTab(contentEl, profile, isEditMode) {
+  contentEl.innerHTML = `<div class="card"><div class="card-title">Environment Secrets</div><div class="loading">Loading secrets...</div></div>`;
+  try {
+    const keysRes = await api(`/api/keys/${profile}`);
+    const keysData = keysRes.ok ? keysRes.keys : [];
+    let html = `<div class="card"><div class="card-title">Environment Secrets</div>`;
+    if (keysData.length === 0) {
+      html += `<div class="stat-row"><span class="stat-label">No secrets configured</span></div>`;
+    } else {
+      html += `<table class="data-table"><thead><tr><th>Key</th><th>Value</th><th>Actions</th></tr></thead><tbody>`;
+      keysData.forEach(k => {
+        const val = isEditMode
+          ? `<input class="modal-input" style="width:100%;margin:0;" data-secret-key="${escapeHtml(k.name)}" value="${k.value ? escapeHtml(k.value) : ''}" type="password" />`
+          : `<span style="color:var(--fg-muted);">${k.set ? '••••••' : '(not set)'}</span>`;
+        const actions = isEditMode
+          ? `<button class="btn btn-ghost btn-sm" onclick="window.revealSecret('${escapeHtml(k.name)}','${profile}')">👁</button>`
+          : `<button class="btn btn-ghost btn-sm" onclick="window.revealSecret('${escapeHtml(k.name)}','${profile}')">👁</button>`;
+        html += `<tr><td style="font-family:var(--font);font-size:12px;">${escapeHtml(k.name)}</td><td>${val}</td><td>${actions}</td></tr>`;
+      });
+      html += `</tbody></table>`;
+    }
+    html += `<div style="display:flex;gap:8px;margin-top:10px;">
+      ${isEditMode
+        ? `<button class="btn btn-primary" onclick="window.saveSecrets('${profile}')">💾 Save</button><button class="btn btn-ghost" onclick="window.cancelEdit('secrets')">↺ Revert</button>`
+        : `<button class="btn btn-primary" onclick="window.enableEdit('secrets')">✏️ Edit</button>`}
+    </div></div>`;
+    contentEl.innerHTML = html;
+  } catch {
+    contentEl.innerHTML = `<div class="card"><div class="card-title">Secrets</div><div class="error-msg">Failed to load secrets</div></div>`;
+  }
+}
 
 window.revealSecret = async function(keyName, profile) {
   try {
@@ -3965,32 +4012,19 @@ window.saveSecrets = async function(profile) {
 };
 
 window.saveConfig = async function(profile, category) {
-  const rows = document.querySelectorAll('#config-content .stat-row');
-  const config = {};
-  let hasChanges = false;
-  
-  for (const row of rows) {
-    const label = row.querySelector('.stat-label');
-    const input = row.querySelector('input, select');
-    if (!label || !input) continue;
-    
-    const key = label.textContent.trim();
-    let value = input.value.trim();
-    
-    // Parse value based on input type
-    if (input.type === 'number') {
-      value = Number(value);
-    } else if (input.tagName.toLowerCase() === 'select') {
-      value = input.value === 'true';
-    }
-    
-    if (!config[category]) config[category] = {};
-    config[category][key] = value;
-    hasChanges = true;
+  const textarea = document.getElementById('config-edit-textarea');
+  if (!textarea) { showToast('No editor found', 'error'); return; }
+
+  let value;
+  try {
+    value = JSON.parse(textarea.value);
+  } catch {
+    showToast('Invalid JSON — fix syntax errors first', 'error');
+    return;
   }
-  
-  if (!hasChanges) { showToast('No changes to save', 'info'); return; }
-  
+
+  const config = { [category]: value };
+
   try {
     const res = await api('/api/config/' + encodeURIComponent(profile), {
       method: 'PUT',
@@ -3999,10 +4033,9 @@ window.saveConfig = async function(profile, category) {
     });
     showToast(res.ok ? 'Config saved' : (res.output || 'Save failed'), res.ok ? 'success' : 'error');
     if (res.ok) {
+      // Update state and re-render
+      if (state._config) state._config.config[category] = value;
       cancelEdit(category);
-      // Refresh the tab to show updated values
-      const tab = document.querySelector(`#config-tabs .tab[data-cat="${category}"]`);
-      if (tab) tab.click();
     }
   } catch (e) { showToast(e.message, 'error'); }
 };
