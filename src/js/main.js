@@ -491,7 +491,6 @@ async function loadHome(container) {
     </div>
     <div class="card-grid" id="home-bottom" style="margin-top:16px;">
       <div class="card"><div class="card-title">Gateways</div><div class="loading">Loading</div></div>
-      <div class="card"><div class="card-title">Token Usage (7d)</div><div class="loading">Loading</div></div>
       <div class="card" id="home-hci-panel"><div class="card-title">HCI</div><div class="loading">Loading</div></div>
     </div>
   `;
@@ -542,12 +541,7 @@ async function loadHome(container) {
         <div class="card-title">Gateways</div>
         ${gwHtml || '<div class="stat-row"><span class="stat-label">No profiles</span></div>'}
       </div>
-      <div class="card">
-        <div class="card-title">Token Usage (7d)</div>
-        <div id="home-token-usage"><div class="loading">Loading...</div></div>
-      </div>
     `;
-    loadTokenUsage('home-token-usage', 7);
 
     // Load HCI version panel
     loadHCIPanel();
@@ -990,7 +984,6 @@ async function loadAgentSessions(container, name) {
     <div id="sessions-table">
       <div class="loading">Loading sessions...</div>
     </div>
-    <div id="session-detail-panel" style="display:none;margin-top:12px;"></div>
   `;
 
   const agentSelect = document.getElementById('session-agent-select');
@@ -1057,20 +1050,24 @@ async function loadAgentSessions(container, name) {
           </thead>
           <tbody>
             ${pageItems.map(s => `
-              <tr class="session-row" data-sid="${s.id}" style="cursor:pointer;">
+              <tr class="session-row" data-sid="${s.id}">
                 <td class="mono" style="font-size:11px;">${s.id || '—'}</td>
                 <td>${escapeHtml(s.title || 'Untitled')}</td>
                 <td><span class="badge">${s.source || '—'}</span></td>
                 <td>${s.messageCount ?? s.message_count ?? '—'}</td>
                 <td style="font-size:11px;color:var(--fg-muted);">${s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '—'}</td>
                 <td>
-                  <div style="display:flex;gap:4px;" onclick="event.stopPropagation()">
+                  <div style="display:flex;gap:4px;">
+                    <button class="btn btn-ghost btn-sm" onclick="toggleSessionDetail(this, '${s.id}', '${currentAgent}')" title="View messages">👁</button>
                     <button class="btn btn-ghost btn-sm" onclick="resumeSession('${s.id}')" title="Resume in CLI">▶</button>
                     <button class="btn btn-ghost btn-sm" onclick="renameSession('${s.id}', '${currentAgent}')" title="Rename">✎</button>
                     <button class="btn btn-ghost btn-sm" onclick="exportSession('${s.id}')" title="Export">↓</button>
                     <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteSession('${s.id}', '${currentAgent}')" title="Delete">×</button>
                   </div>
                 </td>
+              </tr>
+              <tr class="session-detail-row" data-detail="${s.id}" style="display:none;">
+                <td colspan="6" id="session-detail-${s.id}" style="padding:0;border:0;"></td>
               </tr>
             `).join('')}
           </tbody>
@@ -1097,18 +1094,9 @@ async function loadAgentSessions(container, name) {
     document.getElementById('sessions-next')?.addEventListener('click', () => {
       if (currentPage < totalPages - 1) { currentPage++; renderSessions(document.getElementById('session-search')?.value?.toLowerCase() || ''); }
     });
-
-    // Row click → expand session detail
-    tableEl.querySelectorAll('.session-row').forEach(row => {
-      row.addEventListener('click', () => {
-        const sid = row.dataset.sid;
-        showSessionDetail(sid, currentAgent);
-      });
-    });
   }
 
   // Agent selector change
-  agentSelect?.addEventListener('change', () => fetchAndRender(agentSelect.value));
 
   // Refresh button
   refreshBtn?.addEventListener('click', () => fetchAndRender(agentSelect?.value || currentAgent));
@@ -1123,26 +1111,35 @@ async function loadAgentSessions(container, name) {
   await fetchAndRender(name);
 }
 
-async function showSessionDetail(sessionId, profile) {
-  const panel = document.getElementById('session-detail-panel');
-  if (!panel) return;
-  panel.style.display = 'block';
-  panel.innerHTML = '<div class="loading">Loading messages...</div>';
+async function toggleSessionDetail(btn, sessionId, profile) {
+  const detailRow = document.querySelector(`[data-detail="${sessionId}"]`);
+  if (!detailRow) return;
+
+  // Toggle visibility
+  if (detailRow.style.display !== 'none') {
+    detailRow.style.display = 'none';
+    return;
+  }
+
+  detailRow.style.display = '';
+  const cell = document.getElementById(`session-detail-${sessionId}`);
+  cell.innerHTML = '<div class="loading" style="padding:16px;">Loading messages...</div>';
 
   try {
     const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
-    if (!r.ok) { panel.innerHTML = '<div class="error-msg">Failed to load messages</div>'; return; }
+    if (!r.ok) { cell.innerHTML = '<div class="error-msg" style="padding:16px;">Failed to load messages</div>'; return; }
     const data = await r.json();
     if (!data.messages || data.messages.length === 0) {
-      panel.innerHTML = '<div class="card"><div class="card-title">Session ' + escapeHtml(sessionId) + '</div><div style="color:var(--fg-muted);padding:12px 0;">No messages in this session</div></div>';
+      cell.innerHTML = '<div style="color:var(--fg-muted);padding:16px;">No messages in this session</div>';
       return;
     }
 
-    let html = `<div class="card" style="max-height:500px;overflow-y:auto;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <div class="card-title" style="margin:0;">${escapeHtml(data.title || 'Session ' + sessionId)}</div>
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('session-detail-panel').style.display='none'">✕ Close</button>
-      </div>`;
+    let html = `<div style="padding:12px 16px;background:var(--bg-panel);border-radius:0 0 8px 8px;border:1px solid var(--border);border-top:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="font-size:13px;font-weight:600;color:var(--fg);">${escapeHtml(data.title || 'Session ' + sessionId)}</span>
+        <button class="btn btn-ghost btn-sm" onclick="this.closest('tr').style.display='none'">✕ Close</button>
+      </div>
+      <div style="max-height:400px;overflow-y:auto;">`;
 
     for (const m of data.messages) {
       const roleColors = {
@@ -1155,7 +1152,6 @@ async function showSessionDetail(sessionId, profile) {
       const rc = roleColors[m.role] || roleColors.system;
       const ts = m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
       let content = m.content || '';
-      // Strip banners
       content = content.replace(/Resume this session with:.*$/gm, '');
       content = content.replace(/^Session:\s*\d+.*$/gm, '');
       content = content.replace(/^Duration:.*$/gm, '');
@@ -1170,11 +1166,10 @@ async function showSessionDetail(sessionId, profile) {
         <div style="font-size:12px;line-height:1.5;color:var(--fg);white-space:pre-wrap;word-break:break-word;">${escapeHtml(content).substring(0, 2000)}${content.length > 2000 ? '\n... (truncated)' : ''}</div>
       </div>`;
     }
-    html += '</div>';
-    panel.innerHTML = html;
-    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    html += '</div></div>';
+    cell.innerHTML = html;
   } catch (e) {
-    panel.innerHTML = '<div class="error-msg">' + escapeHtml(e.message) + '</div>';
+    cell.innerHTML = '<div class="error-msg" style="padding:16px;">' + escapeHtml(e.message) + '</div>';
   }
 }
 
@@ -1462,40 +1457,10 @@ async function loadAgentGateway(container, name) {
           </div>
         </div>
       </div>
-      <div style="margin-top:16px;">
-        <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
-          <div class="tabs" id="log-tabs" style="margin:0;">
-            <button class="tab active" data-log="agent">Agent</button>
-            <button class="tab" data-log="gateway">Gateway</button>
-            <button class="tab" data-log="errors">Errors</button>
-          </div>
-          <select id="log-level" class="log-level-select" style="margin-left:auto;">
-            <option value="">All levels</option>
-            <option value="WARNING">WARNING+</option>
-            <option value="ERROR">ERROR+</option>
-          </select>
-          <button class="btn btn-ghost" onclick="loadGatewayLogs('${name}')">↻ Refresh</button>
-        </div>
-        <div class="log-viewer" id="log-viewer">
-          <div class="loading">Loading logs...</div>
-        </div>
-      </div>
     `;
 
     // Load connections
     loadGatewayConnections(name);
-
-    // Load logs
-    loadGatewayLogs(name);
-
-    // Log tab switching
-    document.getElementById('log-tabs')?.addEventListener('click', (e) => {
-      const tab = e.target.closest('.tab');
-      if (!tab) return;
-      document.querySelectorAll('#log-tabs .tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      loadGatewayLogs(name);
-    });
 
   } catch (e) {
     container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
@@ -2078,7 +2043,12 @@ async function fetchUsageData() {
   const days = document.getElementById('usage-days')?.value || '7';
   const agent = document.getElementById('usage-agent')?.value || '';
   const query = agent ? `?profile=${agent}` : '';
-  const res = await api(`/api/usage/${days}${query}`);
+
+  // Fetch both overview + daily data in parallel
+  const [res, dailyRes] = await Promise.all([
+    api(`/api/usage/${days}${query}`),
+    api(`/api/usage/daily/${days}${query}`),
+  ]);
 
   if (!res.ok) {
     document.getElementById('usage-overview').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${res.error || 'Failed to load'}</div></div>`;
@@ -2122,7 +2092,7 @@ async function fetchUsageData() {
   `;
 
   // Render charts
-  renderUsageCharts(d);
+  renderUsageCharts(d, dailyRes.ok ? dailyRes : null);
 
   // Top Tools card
   const toolsEl = document.getElementById('usage-tools');
@@ -3624,6 +3594,7 @@ window.openFileInEditor = openFileInEditor;
 window.saveCurrentFile = saveCurrentFile;
 window.loadFileExplorer = loadFileExplorer;
 window.resumeSession = resumeSession;
+window.toggleSessionDetail = toggleSessionDetail;
 window.openTerminalPanel = openTerminalPanel;
 window.loadHome = loadHome;
 window.loadAgentDetail = loadAgentDetail;
