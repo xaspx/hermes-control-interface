@@ -2054,15 +2054,18 @@ async function loadUsers() {
     const res = await api('/api/users');
     const el = document.getElementById('users-list');
     if (res.ok && res.users) {
-      el.innerHTML = res.users.map(u => `
-        <div class="stat-row">
-          <span class="stat-label">${u.username} <span class="badge">${u.role}</span></span>
-          <span class="stat-value">
+      el.innerHTML = res.users.map(u => {
+        const canManage = hasPerm('users.manage');
+        const permCount = u.permissions ? Object.values(u.permissions).filter(Boolean).length : 0;
+        return `<div class="stat-row">
+          <span class="stat-label">${u.username} <span class="badge">${u.role}</span> <span style="color:var(--fg-subtle);font-size:10px;">${permCount} perms</span></span>
+          <span class="stat-value" style="display:flex;gap:4px;align-items:center;">
             ${u.last_login ? new Date(u.last_login).toLocaleDateString() : 'never'}
-            ${res.users.length > 1 ? `<button class="btn btn-ghost btn-sm btn-danger" onclick="deleteUser('${u.username}')" style="margin-left:8px;">×</button>` : ''}
+            ${canManage ? `<button class="btn btn-ghost btn-sm" onclick="showEditUser('${u.username}')" title="Edit permissions">⚙</button>
+            ${res.users.length > 1 ? `<button class="btn btn-ghost btn-sm btn-danger" onclick="deleteUser('${u.username}')">×</button>` : ''}` : ''}
           </span>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
     } else {
       el.innerHTML = '<div class="stat-row"><span class="stat-label">No users</span></div>';
     }
@@ -2371,6 +2374,41 @@ async function createUser(username, password, role) {
   } catch (e) {
     showToast(`Failed: ${e.message}`, 'error');
   }
+}
+
+async function showEditUser(username) {
+  const usersRes = await api('/api/users');
+  const user = usersRes.users?.find(u => u.username === username);
+  if (!user) return showToast('User not found', 'error');
+
+  const result = await showModal({
+    title: `Edit User: ${username}`,
+    message: `Role: ${user.role} · ${user.permissions ? Object.values(user.permissions).filter(Boolean).length : 0} permissions`,
+    inputs: [
+      { placeholder: 'Role (admin/viewer/custom)', value: user.role },
+    ],
+    buttons: [
+      { text: 'Cancel', value: false },
+      { text: 'Save', value: true, primary: true },
+    ],
+  });
+  if (!result?.action) return;
+  const role = result.inputs[0]?.trim() || user.role;
+  if (!['admin', 'viewer', 'custom'].includes(role)) return showToast('Invalid role', 'error');
+  try {
+    const csrfToken = state.csrfToken || '';
+    const res = await api(`/api/users/${encodeURIComponent(username)}`, {
+      method: 'PUT',
+      headers: { 'X-CSRF-Token': csrfToken },
+      body: JSON.stringify({ role }),
+    });
+    if (res.ok) {
+      showToast(`User ${username} updated to ${role}`, 'success');
+      loadUsers();
+    } else {
+      showToast(`Failed: ${res.error}`, 'error');
+    }
+  } catch (e) { showToast(`Failed: ${e.message}`, 'error'); }
 }
 
 // ============================================
