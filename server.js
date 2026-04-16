@@ -1732,12 +1732,27 @@ app.get('/api/all-sessions', requireAuth, async (req, res) => {
 
 function parseHermesProfileList(raw) {
   const lines = String(raw || '').split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean);
-  // First line is header, second is separator — skip both, parse from line 3 onward
-  const dataLines = lines.slice(2);
+  // Find the header row dynamically by looking for "Profile" followed by "Model" and "Gateway"
+  let headerIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/profile\s+model\s+gateway/i.test(lines[i])) {
+      headerIndex = i;
+      break;
+    }
+  }
+  if (headerIndex === -1) return [];
+  // Skip header, separator, and any lines containing python-dotenv warnings
+  const dataLines = [];
+  for (let i = headerIndex + 2; i < lines.length; i++) {
+    const line = lines[i];
+    // Skip separator line (box-drawing dashes)
+    if (/^[\s─▪▫·∙¤]+$/.test(line)) continue;
+    // Skip any lines containing python-dotenv warnings as extra safety
+    if (line.toLowerCase().includes('python-dotenv')) continue;
+    dataLines.push(line);
+  }
   const profiles = [];
   for (const line of dataLines) {
-    // Skip blank and separator lines (box-drawing dashes, not \s)
-    if (/^[\s─▪▫·∙¤]+$/.test(line)) continue;
     const active = line.includes('◆');
     const cleaned = line.replace(/[◆]+$/, '').replace(/\s*◆\s*/, '').trimEnd();
     const parts = cleaned.split(/\s{2,}/).map((p) => p.trim()).filter(Boolean);
