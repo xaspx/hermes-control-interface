@@ -288,8 +288,17 @@ async function loadChat(container) {
   // Load sessions
   await refreshChatSidebar();
 
-  // Profile change → refresh sidebar
-  profileSelect?.addEventListener('change', refreshChatSidebar);
+  // Profile change → refresh sidebar + update model badge
+  profileSelect?.addEventListener('change', () => { refreshChatSidebar(); updateChatModelBadge(); });
+
+  // Populate model selector from session data
+  try {
+    const modelRes = await api('/api/model');
+    if (modelRes.ok && modelRes.model) {
+      const badge = document.getElementById('chat-model-badge');
+      if (badge) badge.textContent = modelRes.model;
+    }
+  } catch {}
 
   // Session search
   document.getElementById('chat-session-search')?.addEventListener('input', (e) => {
@@ -339,14 +348,29 @@ async function refreshChatSidebar() {
     listEl.innerHTML = sessions.slice(0, 50).map(s => {
       const title = (s.title && s.title !== '—') ? s.title : s.id;
       const isActive = s.id == currentSid;
+      const msgs = s.messageCount || s.message_count || 0;
+      const model = s.model || '';
+      const modelTag = model ? `<span style="font-size:9px;background:var(--bg-panel);padding:1px 4px;border-radius:3px;color:var(--fg-subtle);">${escapeHtml(model.split('/').pop())}</span>` : '';
       return `<div class="chat-session-item ${isActive ? 'active' : ''}" data-sid="${s.id}" data-title="${escapeHtml(title)}" onclick="loadChatSession('${s.id}')">
-        <div class="chat-session-title">${escapeHtml(title.substring(0, 40))}</div>
+        <div class="chat-session-title">${escapeHtml(title.substring(0, 45))}</div>
         <div class="chat-session-meta">
-          <span>${s.messageCount || s.message_count || 0} msgs</span>
-          <span>${s.source || ''}</span>
+          <span>${msgs} msgs</span>
+          ${modelTag}
         </div>
       </div>`;
     }).join('');
+  } catch {}
+}
+
+async function updateChatModelBadge() {
+  try {
+    const profile = document.getElementById('chat-profile')?.value || 'default';
+    const profFlag = profile !== 'default' ? `?profile=${encodeURIComponent(profile)}` : '';
+    const res = await api(`/api/model${profFlag}`);
+    if (res.ok && res.model) {
+      const badge = document.getElementById('chat-model-badge');
+      if (badge) badge.textContent = res.model;
+    }
   } catch {}
 }
 
@@ -398,63 +422,88 @@ async function loadChatSession(sessionId) {
 function renderChatMessage(msg) {
   const role = msg.role || 'unknown';
   const colors = {
-    user: { bg: 'var(--accent-dim)', border: 'var(--accent)', label: 'You' },
-    assistant: { bg: 'var(--bg-card)', border: 'var(--green, #4ade80)', label: 'Assistant' },
-    tool: { bg: 'rgba(251,146,60,0.06)', border: '#fb923c', label: 'Tool Call' },
-    tool_result: { bg: 'rgba(251,146,60,0.06)', border: '#fb923c', label: 'Tool Result' },
-    system: { bg: 'rgba(156,163,175,0.06)', border: '#9ca3af', label: 'System' },
+    user: { bg: 'var(--accent-dim)', border: 'var(--accent)', label: 'You', icon: '👤' },
+    assistant: { bg: 'var(--bg-card)', border: 'var(--green, #4ade80)', label: 'Assistant', icon: '🤖' },
+    tool: { bg: 'rgba(251,146,60,0.06)', border: '#fb923c', label: 'Tool Call', icon: '🔧' },
+    system: { bg: 'rgba(156,163,175,0.06)', border: '#9ca3af', label: 'System', icon: '⚙️' },
   };
   const c = colors[role] || colors.system;
-  const ts = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  const ts = msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 
   const div = document.createElement('div');
   div.className = 'chat-msg';
-  div.style.cssText = `margin-bottom:8px;padding:10px 14px;border-radius:8px;background:${c.bg};border-left:3px solid ${c.border};`;
+  div.style.cssText = `margin-bottom:12px;padding:12px 16px;border-radius:10px;background:${c.bg};border-left:3px solid ${c.border};`;
 
   // Header
   const header = document.createElement('div');
-  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
-  header.innerHTML = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--fg-muted);">${c.label}</span>${ts ? `<span style="font-size:10px;color:var(--fg-subtle);">${ts}</span>` : ''}`;
+  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
+  header.innerHTML = `<span style="font-size:11px;font-weight:600;color:var(--fg-muted);display:flex;align-items:center;gap:4px;">${c.icon} ${c.label}</span>${ts ? `<span style="font-size:10px;color:var(--fg-subtle);">${ts}</span>` : ''}`;
   div.appendChild(header);
+
+  // Tool calls — render as collapsible cards
+  if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+    for (const tc of msg.tool_calls) {
+      const fn = tc.function || tc;
+      const name = fn.name || tc.name || 'unknown';
+      let args = {};
+      try { args = typeof fn.arguments === 'string' ? JSON.parse(fn.arguments) : (fn.arguments || {}); } catch {}
+      
+      const toolCard = document.createElement('div');
+      toolCard.className = 'chat-tool-card';
+      toolCard.innerHTML = `
+        <div class="chat-tool-header" onclick="this.parentElement.classList.toggle('expanded')">
+          <span class="chat-tool-icon">🔧</span>
+          <span class="chat-tool-name">${escapeHtml(name)}</span>
+          <span class="chat-tool-args-preview">${escapeHtml(Object.keys(args).slice(0, 3).join(', '))}</span>
+          <span class="chat-tool-chevron">▶</span>
+        </div>
+        <div class="chat-tool-body">
+          <div class="chat-tool-args"><pre style="margin:0;white-space:pre-wrap;word-break:break-all;font-size:11px;">${escapeHtml(JSON.stringify(args, null, 2))}</pre></div>
+        </div>
+      `;
+      div.appendChild(toolCard);
+    }
+  }
+
+  // Tool result content
+  if (role === 'tool') {
+    const contentDiv = document.createElement('div');
+    contentDiv.style.cssText = 'font-size:12px;line-height:1.6;color:var(--fg);white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;background:var(--bg-panel);padding:8px;border-radius:6px;';
+    let content = msg.content || '';
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed.summary) content = parsed.summary;
+      else if (parsed.results) content = JSON.stringify(parsed.results, null, 2);
+      else content = JSON.stringify(parsed, null, 2);
+    } catch {}
+    contentDiv.textContent = content.substring(0, 2000);
+    div.appendChild(contentDiv);
+    return div;
+  }
 
   // Content
   let content = msg.content || '';
-  content = content.replace(/Resume this session with:.*$/gm, '');
+  content = content.replace(/^Resume this session with:.*$/gm, '');
   content = content.replace(/^Session:\s*\d+.*$/gm, '');
   content = content.replace(/^Duration:.*$/gm, '');
   content = content.replace(/^-{10,}$/gm, '');
   content = content.trim();
 
-  const contentDiv = document.createElement('div');
-  contentDiv.style.cssText = 'font-size:13px;line-height:1.7;color:var(--fg);white-space:pre-wrap;word-break:break-word;';
-
-  // Tool call handling
-  if (role === 'tool' || role === 'tool_result') {
-    try {
-      const parsed = typeof content === 'string' && content.startsWith('{') ? JSON.parse(content) : null;
-      if (parsed?.function?.name) {
-        const details = document.createElement('details');
-        details.style.cssText = 'margin-top:4px;';
-        const summary = document.createElement('summary');
-        summary.style.cssText = 'cursor:pointer;font-size:12px;font-weight:600;color:var(--amber);';
-        summary.textContent = `🔧 ${parsed.function.name}`;
-        details.appendChild(summary);
-        const pre = document.createElement('pre');
-        pre.style.cssText = 'background:var(--bg-panel);padding:8px;border-radius:4px;font-size:11px;overflow-x:auto;max-height:300px;margin-top:6px;';
-        pre.textContent = JSON.stringify(parsed, null, 2);
-        details.appendChild(pre);
-        contentDiv.appendChild(details);
-      } else {
-        contentDiv.innerHTML = renderChatContent(content.substring(0, 3000));
-      }
-    } catch {
-      contentDiv.innerHTML = renderChatContent(content.substring(0, 3000));
-    }
-  } else {
-    contentDiv.innerHTML = renderChatContent(content.substring(0, 5000));
+  if (content) {
+    const contentDiv = document.createElement('div');
+    contentDiv.style.cssText = 'font-size:13px;line-height:1.7;color:var(--fg);white-space:pre-wrap;word-break:break-word;';
+    contentDiv.innerHTML = renderChatContent(content.substring(0, 8000));
+    div.appendChild(contentDiv);
   }
 
-  div.appendChild(contentDiv);
+  // Reasoning (if present, collapsible)
+  if (msg.reasoning) {
+    const rd = document.createElement('details');
+    rd.style.cssText = 'margin-top:8px;';
+    rd.innerHTML = `<summary style="cursor:pointer;font-size:11px;color:var(--fg-subtle);">💭 Reasoning</summary><div style="font-size:11px;color:var(--fg-muted);line-height:1.5;white-space:pre-wrap;padding:6px;background:var(--bg-panel);border-radius:4px;margin-top:4px;max-height:150px;overflow-y:auto;">${escapeHtml(msg.reasoning.substring(0, 2000))}</div>`;
+    div.appendChild(rd);
+  }
+
   return div;
 }
 

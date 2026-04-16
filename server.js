@@ -284,7 +284,7 @@ app.post('/api/chat/send', requireAuth, requirePerm('sessions.messages'), async 
   const modelFlag = model ? `-m ${model}` : '';
   // Resume existing session or continue latest
   const resumeFlag = sessionId ? `--resume ${sessionId}` : '--continue';
-  const fullCmd = `hermes chat -q ${escapedMsg} ${profileFlag} ${modelFlag} ${resumeFlag} 2>&1`;
+  const fullCmd = `hermes chat -Q -q ${escapedMsg} ${profileFlag} ${modelFlag} ${resumeFlag} 2>&1`;
 
   // SSE response
   res.writeHead(200, {
@@ -302,31 +302,20 @@ app.post('/api/chat/send', requireAuth, requirePerm('sessions.messages'), async 
       env: { ...process.env, HERMES_HOME: path.join(os.homedir(), '.hermes') },
     });
 
-    let bannerBuffer = '';
-    let bannerDone = false;
-
     proc.stdout.on('data', (chunk) => {
       const text = chunk.toString();
       fullResponse += text;
-
-      if (!bannerDone) {
-        bannerBuffer += text;
-        // Check if banner has closed (╰...╯ pattern)
-        if (/╰[═─╯]/.test(bannerBuffer)) {
-          bannerDone = true;
-          // Find content after the banner closing line
-          const afterBanner = bannerBuffer.replace(/╭[═─╮][\s\S]*?╰[═─╯][^\n]*\n?/g, '').trim();
-          if (afterBanner) {
-            res.write(`data: ${JSON.stringify({ type: 'token', content: afterBanner + '\n' })}\n\n`);
-          }
-          bannerBuffer = '';
-        }
-        return;
-      }
-
-      // After banner, stream normally but strip any nested banners
-      const cleaned = text.replace(/╭[═─╮][\s\S]*?╰[═─╯][^\n]*\n?/g, '');
-      if (cleaned) {
+      // With -Q flag, output is clean — stream directly
+      const cleaned = text
+        .replace(/╭[═─╮][\s\S]*?╰[═─╯][^\n]*\n?/g, '') // safety: strip any remaining banners
+        .replace(/^Session:\s+\d+.*$/gm, '')
+        .replace(/^Resume this session with:.*$/gm, '')
+        .replace(/^Duration:.*$/gm, '')
+        .replace(/^Messages:.*$/gm, '')
+        .replace(/^Query:.*$/gm, '')
+        .replace(/^-{10,}$/gm, '')
+        .replace(/^Initializing agent.*$/gm, '');
+      if (cleaned.trim()) {
         res.write(`data: ${JSON.stringify({ type: 'token', content: cleaned })}\n\n`);
       }
     });

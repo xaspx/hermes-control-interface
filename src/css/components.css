@@ -1871,3 +1871,16 @@
   .file-editor-panel { min-height: 300px; }
   .file-editor-textarea { font-size: 14px; }
 }
+
+/* Chat tool call cards */
+.chat-tool-card { margin: 6px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.chat-tool-header { display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer; background: var(--bg-panel); font-size: 12px; transition: background 0.15s; }
+.chat-tool-header:hover { background: var(--bg-input); }
+.chat-tool-icon { font-size: 11px; }
+.chat-tool-name { font-weight: 600; color: var(--accent); font-family: monospace; }
+.chat-tool-args-preview { color: var(--fg-subtle); font-size: 10px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-tool-chevron { font-size: 8px; color: var(--fg-subtle); transition: transform 0.2s; }
+.chat-tool-card.expanded .chat-tool-chevron { transform: rotate(90deg); }
+.chat-tool-body { display: none; border-top: 1px solid var(--border); padding: 8px 10px; background: rgba(0,0,0,0.15); }
+.chat-tool-card.expanded .chat-tool-body { display: block; }
+.chat-tool-args pre { color: var(--fg); }
