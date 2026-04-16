@@ -209,12 +209,254 @@ async function loadPage(page, params = {}) {
       case 'files':
         await loadFileExplorer(container);
         break;
+      case 'chat':
+        await loadChat(container);
+        break;
+      case 'logs':
+        await loadLogs(container);
+        break;
       default:
         container.innerHTML = `<div class="empty">Page not found</div>`;
     }
   } catch (err) {
     container.innerHTML = `<div class="empty">Error loading page: ${err.message}</div>`;
   }
+}
+
+// ============================================
+// Chat Functions
+// ============================================
+async function loadChat(container) {
+  container.innerHTML = `
+    <div class="chat-sidebar" id="chat-sidebar">
+      ${await loadChatSidebar()}
+    </div>
+    <div class="chat-main" id="chat-main">
+      <div class="chat-header" id="chat-header">
+        <div class="chat-title" id="chat-title">New Chat</div>
+        <div class="chat-status" id="chat-status-session">—</div>
+        <div class="chat-status-elapsed" id="chat-status-elapsed"></div>
+        <div style="display:flex;gap:4px;">
+          <button class="btn btn-ghost btn-sm" onclick="newChatSession()" title="New Chat">+ New</button>
+          <button class="btn btn-ghost btn-sm" onclick="renameChatSession()" title="Rename">✏ Rename</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteChatSession()" title="Delete">✕ Delete</button>
+        </div>
+      </div>
+      <div class="chat-messages" id="chat-messages"></div>
+      <div class="chat-input-area" id="chat-input-area">
+        <select id="chat-profile" onchange="loadChatSidebar()" style="width:120px;">
+          <option value="default">default</option>
+        </select>
+        <select id="chat-model" style="width:180px;">
+          <option value="">auto</option>
+        </select>
+        <input id="chat-input" placeholder="Type a message…" onkeydown="if(event.key==='Enter')sendChatMessage()" />
+        <button class="btn btn-primary" id="chat-send-btn" onclick="sendChatMessage()">Send</button>
+      </div>
+    </div>
+  `;
+  loadChatSession(0);
+}
+
+async function loadChatSidebar() {
+  const profile = document.getElementById('chat-profile')?.value || 'default';
+  let html = `<div class="session-item" onclick="loadChatSession(0)" style="padding:8px 12px;cursor:pointer;">
+    <div style="font-size:13px;">New Chat</div>
+    <div style="font-size:11px;color:var(--fg-subtle);">0 messages</div>
+  </div>`;
+  try {
+    const res = await fetch(`/api/all-sessions?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.sessions && data.sessions.length > 0) {
+        html = data.sessions.map(s => `
+          <div class="session-item" onclick="loadChatSession(${s.id})" style="padding:8px 12px;cursor:pointer;">
+            <div style="font-size:13px;">${s.title || 'Chat ' + s.id} ${s.id === 0 ? '' : '(' + s.messageCount + ' messages)'}</div>
+            <div style="font-size:11px;color:var(--fg-subtle);">${s.messageCount} messages</div>
+          </div>
+        `).join('');
+      }
+    }
+  } catch (e) {}
+  const sidebar = document.getElementById('chat-sidebar');
+  if (sidebar) sidebar.innerHTML = html;
+}
+
+async function loadChatSession(sessionId) {
+  const profile = document.getElementById('chat-profile')?.value || 'default';
+  const container = document.getElementById('chat-messages');
+  const n = document.getElementById('chat-title');
+  if (!container) return;
+  container.innerHTML = '<div class="loading">Loading messages</div>';
+  try {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
+    if (!r.ok) { container.innerHTML = '<div class="error-msg">Failed to load messages</div>'; return; }
+    const i = await r.json();
+    if (n) n.textContent = i.title || ('Chat ' + sessionId);
+    if (!i.messages || i.messages.length === 0) { container.innerHTML = '<div style="text-align:center;color:var(--fg-subtle);padding:40px;font-size:13px;">No messages in this session yet</div>'; return; }
+    container.innerHTML = '';
+    for (const m of i.messages) Fu(container, m);
+    container.scrollTop = container.scrollHeight;
+  } catch (e) { container.innerHTML = '<div class="error-msg">' + Z(e.message) + '</div>'; }
+}
+
+function Fu(p, t) {
+  const n = t.role || 'unknown';
+  const r = { user: { bg: 'var(--accent-dim)', border: 'var(--accent)' }, assistant: { bg: 'var(--bg-card)', border: 'var(--green, #4ade80)' }, tool: { bg: 'rgba(251,146,60,0.08)', border: '#fb923c' }, tool_result: { bg: 'rgba(251,146,60,0.08)', border: '#fb923c' }, system: { bg: 'rgba(156,163,175,0.08)', border: '#9ca3af' } };
+  const i = r[n] || r.system;
+  const a = document.createElement('div');
+  a.style.cssText = 'margin-bottom:8px;padding:10px 12px;border-radius:8px;background:' + i.bg + ';border-left:3px solid ' + i.border + ';';
+  const o = t.timestamp ? new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  if (o) { const d = document.createElement('div'); d.style.cssText = 'font-size:10px;color:var(--fg-subtle);margin-bottom:4px;'; d.textContent = o; a.appendChild(d); }
+  const e = document.createElement('div');
+  let s = t.content || '';
+  s = s.replace(/\u256d\u2500+[\\s\\S]*?\u2570\u2500+[^]*?\u256f/g, '');
+  s = s.replace(/Resume this session with:.*$/gm, '');
+  s = s.replace(/^Session:\\s*\\d+.*$/gm, '');
+  s = s.replace(/^Duration:.*$/gm, '');
+  s = s.replace(/^Messages:.*$/gm, '');
+  s = s.replace(/^Query:.*$/gm, '');
+  s = s.replace(/^Initializing agent\\.\\.\\..*$/gm, '');
+  s = s.replace(/^-{10,}$/gm, '');
+  s = s.trim();
+  if (s.includes('\\n\\n')) {
+    const parts = s.split('\\n\\n').filter(p => p.trim());
+    parts.forEach((part, idx) => {
+      const div = document.createElement('div');
+      div.style.cssText = 'margin-bottom:4px;font-size:13px;line-height:1.6;color:var(--fg);';
+      if (idx === 0 && part.startsWith('```json') && part.endsWith('```')) {
+        try {
+          const parsed = JSON.parse(part.replace(/```json/, '').replace(/```/, '').trim());
+          const pre = document.createElement('pre');
+          pre.style.cssText = 'background:var(--bg-panel);padding:8px;border-radius:4px;overflow-x:auto;font-size:11px;color:var(--fg);white-space:pre-wrap;';
+          pre.textContent = JSON.stringify(parsed, null, 2);
+          div.appendChild(pre);
+        } catch (err) { div.textContent = part; }
+      } else {
+        div.textContent = part;
+      }
+      e.appendChild(div);
+    });
+  } else {
+    e.style.cssText = 'font-size:13px;line-height:1.6;color:var(--fg);';
+    e.textContent = s;
+  }
+  a.appendChild(e);
+  p.appendChild(a);
+}
+
+async function newChatSession() {
+  const container = document.getElementById('page-chat');
+  if (!container) return;
+  container.querySelectorAll('.session-item')?.forEach(el => el.remove());
+  const chatHeader = document.getElementById('chat-header');
+  if (chatHeader) chatHeader.querySelector('.chat-title').textContent = 'New Chat';
+  const messages = document.getElementById('chat-messages');
+  if (messages) messages.innerHTML = '<div style="text-align:center;color:var(--fg-subtle);padding:60px 20px;"><div style="font-size:24px;margin-bottom:12px;">💬</div><div style="font-size:14px;margin-bottom:4px;">New conversation</div><div style="font-size:12px;">Type a message to start</div></div>';
+}
+
+async function renameChatSession(sessionId = 0) {
+  const titleEl = document.getElementById('chat-title');
+  const sessionIdNum = sessionId || parseInt(prompt('Enter session ID to rename:'));
+  if (isNaN(sessionIdNum)) return;
+  const t = await vd({ title: 'Rename Session', message: 'Enter a new title for this session.', inputs: [{ placeholder: 'New title' }], buttons: [{ text: 'Cancel', value: false }, { text: 'Rename', value: true, primary: true }] });
+  if (!t?.action || !t.inputs?.[0]) return;
+  const n = t.inputs[0].trim();
+  if (!n) return;
+  try {
+    const profile = document.getElementById('chat-profile')?.value || 'default';
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionIdNum)}/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': Y.csrfToken || '' }, body: JSON.stringify({ title: n, profile }) });
+    if (r.ok) { $(`Session renamed`, 'success'); await loadChatSidebar(); if (sessionIdNum === 0) titleEl.textContent = n; } else $(`Rename failed`, 'error');
+  } catch (e) { $(`Rename failed: ${e.message}`, 'error'); }
+}
+
+async function deleteChatSession(sessionId = 0) {
+  if (!(await vd({ title: 'Delete Session', message: 'Delete this session? This cannot be undone.', buttons: [{ text: 'Cancel', value: false }, { text: 'Delete', value: true, primary: true }] })?.action)) return;
+  try {
+    const profile = document.getElementById('chat-profile')?.value || 'default';
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE', headers: { 'X-CSRF-Token': Y.csrfToken || '', 'Content-Type': 'application/json' }, credentials: 'include' });
+    if (r.ok) { $(`Session deleted`, 'success'); await loadChatSidebar(); if (sessionId === 0) { const messages = document.getElementById('chat-messages'); if (messages) messages.innerHTML = '<div style="text-align:center;color:var(--fg-subtle);padding:60px 20px;"><div style="font-size:24px;margin-bottom:12px;">💬</div><div style="font-size:14px;margin-bottom:4px;">New conversation</div><div style="font-size:12px;">Type a message to start</div></div>'; } } else $(`Delete failed`, 'error');
+  } catch (e) { $(`Delete failed: ${e.message}`, 'error'); }
+}
+
+async function sendChatMessage() {
+  if (Y._chatLock) return;
+  const input = document.getElementById('chat-input');
+  const text = input?.value?.trim();
+  if (!text) return;
+  const profile = document.getElementById('chat-profile')?.value || 'default';
+  const model = document.getElementById('chat-model')?.value || '';
+  input.value = '';
+  input.style.height = 'auto';
+  Y._chatLock = true;
+  const btn = document.getElementById('chat-send-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  const messagesDiv = document.getElementById('chat-messages');
+  if (messagesDiv) {
+    const existing = messagesDiv.querySelector('[style*="text-align:center"]');
+    if (existing) existing.remove();
+    messagesDiv.appendChild(createMessageDiv('user', text));
+  }
+  const streamEl = document.createElement('div');
+  streamEl.id = 'chat-streaming';
+  streamEl.style.cssText = 'margin-bottom:8px;padding:10px 12px;border-radius:8px;background:var(--bg-card);border-left:3px solid var(--green, #4ade80);';
+  streamEl.innerHTML = '<div style="font-size:10px;color:var(--fg-subtle);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">assistant</div><div id="chat-stream-content" style="font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--fg);"><span class="chat-cursor" style="animation:blink 1s infinite;">▊</span></div>';
+  if (messagesDiv) messagesDiv.appendChild(streamEl);
+  const contentDiv = streamEl.querySelector('#chat-stream-content');
+  let fullContent = '';
+  let startTime = Date.now();
+  try {
+    const body = JSON.stringify({ message: text, profile, sessionId: 0, model });
+    const response = await fetch('/api/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': Y.csrfToken || '' }, credentials: 'include', body });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let done = false;
+    while (!done) {
+      const { done: d, value } = await reader.read();
+      if (d) { done = true; break; }
+      fullContent += decoder.decode(value, { stream: true });
+      const lines = fullContent.split('\n[ERROR] ');
+      contentDiv.innerHTML = Z(lines[0]);
+      if (lines.length > 1) {
+        const lastLine = lines[lines.length - 1];
+        const match = lastLine.match(/^(.+?)\n\n$/);
+        if (match) {
+          fullContent = match[1];
+          contentDiv.innerHTML = Z(fullContent);
+        }
+      }
+    }
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    if (contentDiv) {
+      contentDiv.innerHTML = Z(fullContent) + '<div style="font-size:10px;color:var(--fg-subtle);margin-top:8px;">Elapsed: ' + elapsed + 's</div>';
+      const cursor = contentDiv.querySelector('.chat-cursor');
+      if (cursor) cursor.remove();
+    }
+    const profileSel = document.getElementById('chat-profile');
+    if (profileSel && profileSel.value === '') profileSel.value = 0;
+    const stats = document.getElementById('chat-status-session');
+    const elapsedEl = document.getElementById('chat-status-elapsed');
+    if (stats) stats.textContent = 0;
+    if (elapsedEl) elapsedEl.textContent = elapsed + 's';
+  } catch (e) {
+    if (contentDiv) contentDiv.innerHTML = Z(fullContent) + '<div style="color:var(--red);margin-top:8px;">Error: ' + Z(e.message) + '</div>';
+  } finally {
+    Y._chatLock = false;
+    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+  }
+}
+
+function createMessageDiv(role, content) {
+  const r = { user: { bg: 'var(--accent-dim)', border: 'var(--accent)' }, assistant: { bg: 'var(--bg-card)', border: 'var(--green, #4ade80)' } };
+  const i = r[role] || r.assistant;
+  const a = document.createElement('div');
+  a.style.cssText = 'margin-bottom:8px;padding:10px 12px;border-radius:8px;background:' + i.bg + ';border-left:3px solid ' + i.border + ';';
+  const d = document.createElement('div');
+  d.style.cssText = 'font-size:13px;line-height:1.6;color:var(--fg);';
+  d.textContent = content;
+  a.appendChild(d);
+  return a;
 }
 
 // ============================================
@@ -2668,6 +2910,85 @@ Object.assign(window, {
 
 // Start
 // Expose for onclick handlers in templates
+
+// ============================================
+// Logs Functions
+// ============================================
+async function loadLogs(container) {
+  container.innerHTML = `
+    <div class="logs-toolbar">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <select id="logs-profile" class="log-level-select" onchange="refreshLogs()" style="width:120px;">
+          <option value="all">All Profiles</option>
+        </select>
+        <select id="logs-source" class="log-level-select" onchange="refreshLogs()" style="width:120px;">
+          <option value="all">All Sources</option>
+        </select>
+        <select id="logs-level" class="log-level-select" onchange="refreshLogs()" style="width:120px;">
+          <option value="">All Levels</option>
+          <option value="error">Error</option>
+          <option value="warn">Warning</option>
+          <option value="debug">Debug</option>
+        </select>
+        <input id="logs-search" class="search-input" placeholder="Search logs…" oninput="debounceLogsSearch()" />
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-ghost btn-sm" id="logs-auto-btn" onclick="toggleLogsAutoRefresh()">◯ auto</button>
+        <button class="btn btn-ghost btn-sm" onclick="refreshLogs()">⟳ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadMoreNotifs()" style="display:none;" id="logs-load-more">Load more</button>
+      </div>
+    </div>
+    <div id="logs-list"></div>
+  `;
+  refreshLogs();
+}
+
+async function refreshLogs() {
+  const profile = document.getElementById("logs-profile")?.value || "all";
+  const source = document.getElementById("logs-source")?.value || "all";
+  const level = document.getElementById("logs-level")?.value || "";
+  const search = document.getElementById("logs-search")?.value || "";
+  const container = document.getElementById("logs-list");
+  if (!container) return;
+  container.innerHTML = '<div class="loading">Loading logs</div>';
+  try {
+    const o = new URLSearchParams({ profile, source, lines: "300" });
+    if (level) o.set("level", level);
+    if (search) o.set("search", search);
+    const t0 = performance.now();
+    const r = await Q("/api/logs?" + o);
+    const t = Math.round(performance.now() - t0);
+    if (r.ok && r.logs) {
+      if (r.logs.length === 0) { container.innerHTML = `<div class="empty">No log entries found</div>`; return; }
+      container.innerHTML = r.logs.map(e => {
+        const lvl = e.level === "error" ? "error" : e.level === "warn" ? "warning" : e.level === "debug" ? "subtle" : "main";
+        const time = e.timestamp ? e.timestamp.replace(/T/, " ").replace(/\.\d+Z?/, "") : "—";
+        const prof = `<span style="color:var(--accent);font-size:10px;">[${e.profile}]</span>`;
+        const src = `<span style="color:var(--fg-subtle);font-size:10px;">[${e.source}]</span>`;
+        return `<div style="padding:3px 0;border-bottom:1px solid var(--border);line-height:1.5;"><div style="font-size:11px;color:var(--fg-muted);">${time} ${prof} ${src}</div><div style="color:var(--${lvl});font-size:13px;">${Z(e.message)}</div></div>`;
+      }).join("");
+      const btn = document.getElementById("logs-load-more");
+      if (btn) btn.style.display = r.count && r.count >= 300 ? "block" : "none";
+    } else { container.innerHTML = `<div class="error-msg">Error loading logs</div>`; }
+    } catch (e) { container.innerHTML = `<div class="error-msg">" + Z(e.message) + </div>`; }
+}
+
+function toggleLogsAutoRefresh() {
+  if (Y._logsInterval) { clearInterval(Y._logsInterval); Y._logsInterval = null; document.getElementById("logs-auto-btn").textContent = "◯ auto"; document.getElementById("logs-auto-btn").classList.remove("active"); return; }
+  Y._logsInterval = setInterval(refreshLogs, 5000);
+  const btn = document.getElementById("logs-auto-btn");
+  if (btn) { btn.textContent = "● auto"; btn.classList.add("active"); }
+  refreshLogs();
+}
+
+function debounceLogsSearch() {
+  clearTimeout(Y._logsDebounce);
+  Y._logsDebounce = setTimeout(refreshLogs, 400);
+}
+
+
+// ============================================
+
 window.loadUsage = loadUsage;
 window.fetchUsageData = fetchUsageData;
 window.showCreateCronModal = showCreateCronModal;
@@ -2681,5 +3002,49 @@ window.resumeSession = resumeSession;
 window.openTerminalPanel = openTerminalPanel;
 window.loadHome = loadHome;
 window.loadAgentDetail = loadAgentDetail;
+
+
+// ============================================
+// Permission Helper
+// ============================================
+function hasPerm(perm) {
+  if (!state.user) return false;
+  if (state.user.role === "admin") return true;
+  return !!state.user.permissions?.[perm];
+}
+
+// Expose for onclick handlers in templates
+window.hasPerm = hasPerm;
+
+function dismissNotif(el, id) {
+  if (el) el.style.opacity = "0.4";
+  if (id) {
+    const idx = Y.notifications.findIndex(n => n.id === id);
+    if (idx >= 0) { Y.notifications[idx].dismissed = true; md(); }
+  }
+}
+
+function loadMoreNotifs() {
+  if (Y._notifExtra) Y._notifExtra += 10;
+  else Y._notifExtra = 10;
+  md();
+}
+
+window.dismissNotif = dismissNotif;
+window.loadMoreNotifs = loadMoreNotifs;
+window.refreshLogs = refreshLogs;
+window.toggleLogsAutoRefresh = toggleLogsAutoRefresh;
+window.debounceLogsSearch = debounceLogsSearch;
+window.showCreateUser = showCreateUser;
+window.showEditUser = showEditUser;
+window.togglePwVis = togglePwVis;
+window.applyPreset = applyPreset;
+window.sendChatMessage = sendChatMessage;
+window.loadChatSession = loadChatSession;
+window.loadChatSidebar = loadChatSidebar;
+window.newChatSession = newChatSession;
+window.renameChatSession = renameChatSession;
+window.deleteChatSession = deleteChatSession;
+window.loadLogs = loadLogs;
 
 init();
