@@ -268,7 +268,7 @@ async function loadChatSidebar() {
     if (res.ok) {
       const data = await res.json();
       if (data.sessions && data.sessions.length > 0) {
-        const filtered = data.sessions.filter(s => (s.messageCount > 0) || (s.title && s.title !== '—'));
+        const filtered = data.sessions.filter(s => (s.messageCount > 0) || (s.message_count > 0) || (s.title && s.title !== '—'));
         html = `<div style="padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--border);" onclick="newChatSession()">
           <div style="font-size:13px;color:var(--fg);font-weight:500;">+ New Chat</div>
         </div>` + filtered.slice(0, 50).map(s => {
@@ -2687,11 +2687,20 @@ async function showCreateUser() {
         <div style="font-size:10px;color:var(--fg-subtle);margin-bottom:10px;padding:6px 8px;background:var(--bg-input);border-radius:var(--radius);">Password rules: min 8 chars, no spaces</div>
         <div style="margin-bottom:10px;">
           <label style="font-size:11px;color:var(--fg-muted);display:block;margin-bottom:6px;">Role</label>
-          <div style="display:flex;gap:6px;">
-            <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('form').querySelector('[name=role]').value='admin'">Admin</button>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('form').querySelector('[name=role]').value='viewer'">Viewer</button>
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            <button type="button" class="btn btn-ghost btn-sm" id="role-admin-btn" onclick="this.closest('form').querySelector('[name=role]').value='admin';document.getElementById('perm-custom-list').style.display='none'">Admin</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="role-viewer-btn" onclick="this.closest('form').querySelector('[name=role]').value='viewer';document.getElementById('perm-custom-list').style.display='none'">Viewer</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="role-custom-btn" onclick="this.closest('form').querySelector('[name=role]').value='custom';document.getElementById('perm-custom-list').style.display='block'">Custom</button>
           </div>
           <input type="hidden" name="role" value="viewer" />
+          <div id="perm-custom-list" style="display:none;">
+            <div style="font-size:11px;color:var(--fg-muted);margin-bottom:6px;">Select permissions:</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px;" id="perm-checkboxes">
+              ${['sessions.view','sessions.messages','logs.view','usage.view','gateway.control','config.edit','secrets.view','secrets.reveal','secrets.edit','skills.browse','skills.install','cron.view','cron.manage','files.read','files.write','terminal','users.manage','hci.update','backup','doctor'].map(p =>
+                `<label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:2px 0;"><input type="checkbox" name="perm" value="${p}" /> ${p}</label>`
+              ).join('')}
+            </div>
+          </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
@@ -2726,18 +2735,26 @@ async function showCreateUser() {
     if (password.length < 8) return showToast('Password must be at least 8 chars', 'error');
     if (password !== confirm) return showToast('Passwords do not match', 'error');
     if (/\s/.test(password)) return showToast('Password cannot contain spaces', 'error');
-    createUser(username, password, role);
+    // Collect custom permissions if role is custom
+    let perms = {};
+    if (role === 'custom') {
+      const checked = overlay.querySelectorAll('input[name="perm"]:checked');
+      checked.forEach(cb => { perms[cb.value] = true; });
+    }
+    createUser(username, password, role, perms);
     overlay.remove();
   });
 }
 
-async function createUser(username, password, role) {
+async function createUser(username, password, role, permissions) {
   try {
     const csrfToken = state.csrfToken || '';
+    const body = { username, password, role };
+    if (role === 'custom' && permissions) body.permissions = permissions;
     const res = await api('/api/users', {
       method: 'POST',
       headers: { 'X-CSRF-Token': csrfToken },
-      body: JSON.stringify({ username, password, role }),
+      body: JSON.stringify(body),
     });
     if (res.ok) {
       showToast(`User ${username} created`, 'success');
