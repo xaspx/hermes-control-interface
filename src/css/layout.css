@@ -481,6 +481,7 @@
   .notif-dropdown { right: 8px; left: 8px; width: auto; min-width: 0; }
   .modal-card { width: auto; margin: 16px; }
   .login-card { width: auto; margin: 16px; padding: 24px; }
+  .card-grid { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 480px) {
@@ -488,4 +489,9 @@
   .brand { font-size: 14px; }
   #main { padding: 12px; }
   .user-role { display: none; }
+  .card-grid { grid-template-columns: 1fr !important; }
+  .table-wrap { overflow-x: auto; }
+  .data-table { font-size: 11px; }
+  .data-table th, .data-table td { padding: 6px 8px; }
+  canvas { max-height: 200px !important; }
 }

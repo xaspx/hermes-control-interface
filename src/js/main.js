@@ -3355,23 +3355,64 @@ function init() {
     dropdown.style.display = isVisible ? 'none' : 'block';
 
     if (!isVisible) {
-      // Render notifications
-      const listEl = document.getElementById('notif-list');
-      const unread = state.notifications.filter(n => !n.dismissed).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-      if (unread.length === 0) {
-        listEl.innerHTML = '<div class="notif-empty">No notifications</div>';
-      } else {
-        listEl.innerHTML = unread.map(n => `
-          <div class="notif-item notif-${n.type || 'info'}" style="padding:8px;border-bottom:1px solid var(--border);font-size:11px;">
-            <div style="color:var(--fg);">${escapeHtml(n.message || '')}</div>
-            <div style="color:var(--fg-subtle);font-size:10px;margin-top:2px;">${n.timestamp ? new Date(n.timestamp).toLocaleString() : ''}</div>
-          </div>
-        `).join('');
-      }
+      renderNotifications(5);
     }
   });
 
+  function renderNotifications(limit) {
+    const listEl = document.getElementById('notif-list');
+    const all = state.notifications.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+    const shown = all.slice(0, limit || 5);
+    if (shown.length === 0) {
+      listEl.innerHTML = '<div class="notif-empty">No notifications</div>';
+    } else {
+      listEl.innerHTML = shown.map(n => `
+        <div class="notif-item ${n.dismissed ? 'notif-read' : ''}" data-notif-id="${n.id || ''}" style="padding:8px;border-bottom:1px solid var(--border);font-size:11px;cursor:pointer;${n.dismissed ? 'opacity:0.5;' : ''}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div style="flex:1;color:${n.dismissed ? 'var(--fg-muted)' : 'var(--fg)'};">${escapeHtml(n.message || '')}</div>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();dismissNotifItem('${n.id || ''}')" style="padding:2px 6px;font-size:10px;" title="Dismiss">✕</button>
+          </div>
+          <div style="color:var(--fg-subtle);font-size:10px;margin-top:2px;">${n.timestamp ? new Date(n.timestamp).toLocaleString() : ''}</div>
+        </div>
+      `).join('');
+
+      // Click to mark as read
+      listEl.querySelectorAll('.notif-item').forEach(el => {
+        el.addEventListener('click', () => {
+          const id = el.dataset.notifId;
+          if (id) markNotifRead(id);
+          el.style.opacity = '0.5';
+          el.classList.add('notif-read');
+        });
+      });
+
+      // Load more button
+      if (all.length > limit) {
+        listEl.innerHTML += `<div style="padding:8px;text-align:center;"><button class="btn btn-ghost btn-sm" onclick="loadMoreNotifs(${limit + 5})">Load more (${all.length - limit} remaining)</button></div>`;
+      }
+    }
+  }
+
+  window.loadMoreNotifs = function(newLimit) {
+    renderNotifications(newLimit || 10);
+  };
+
+  window.markNotifRead = async function(id) {
+    const n = state.notifications.find(n => n.id === id);
+    if (n) n.dismissed = true;
+    updateNotifBadge();
+    try { await api('/api/notifications/read', { method: 'POST', body: JSON.stringify({ id }) }); } catch {}
+  };
+
+  window.dismissNotifItem = async function(id) {
+    state.notifications = state.notifications.filter(n => n.id !== id);
+    updateNotifBadge();
+    renderNotifications(5);
+    try { await api('/api/notifications/dismiss', { method: 'POST', body: JSON.stringify({ id }) }); } catch {}
+  };
+
   document.getElementById('notif-clear')?.addEventListener('click', async () => {
+    if (!await customConfirm('Clear all notifications?', 'Notifications')) return;
     await api('/api/notifications/clear', { method: 'POST' });
     state.notifications = [];
     updateNotifBadge();
