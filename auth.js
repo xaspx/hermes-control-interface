@@ -4,10 +4,60 @@
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const USERS_FILE = path.join(process.env.HOME || '/root', '.hermes', 'hci-users.json');
-const AUDIT_FILE = path.join(process.env.HOME || '/root', '.hermes', 'hci-audit.log');
+const HERMES_HOME = path.join(os.homedir(), '.hermes');
+const USERS_FILE = path.join(HERMES_HOME, 'hci-users.json');
+const AUDIT_FILE = path.join(HERMES_HOME, 'hci-audit.log');
 const SALT_ROUNDS = 10;
+
+// ── Permission Constants ──
+const PERMISSIONS = [
+  'sessions.view',
+  'sessions.messages',
+  'logs.view',
+  'usage.view',
+  'gateway.control',
+  'config.edit',
+  'secrets.view',
+  'secrets.reveal',
+  'secrets.edit',
+  'skills.browse',
+  'skills.install',
+  'cron.view',
+  'cron.manage',
+  'files.read',
+  'files.write',
+  'terminal',
+  'users.manage',
+  'hci.update',
+  'backup',
+  'doctor',
+];
+
+// Presets
+const VIEW_PERMS = PERMISSIONS.filter(p =>
+  p.endsWith('.view') || p === 'skills.browse' || p === 'files.read' || p === 'cron.view'
+);
+const PRESET_PERMISSIONS = {
+  admin: Object.fromEntries(PERMISSIONS.map(p => [p, true])),
+  viewer: Object.fromEntries(PERMISSIONS.map(p => [p, VIEW_PERMS.includes(p)])),
+};
+
+function resolvePermissions(role, customPerms) {
+  if (role === 'admin') return PRESET_PERMISSIONS.admin;
+  if (role === 'viewer') return PRESET_PERMISSIONS.viewer;
+  // custom — merge provided with viewer defaults
+  return { ...PRESET_PERMISSIONS.viewer, ...(customPerms || {}) };
+}
+
+// Username validation — prevent injection and log corruption
+function sanitizeUsername(name) {
+  const s = String(name || '').trim();
+  if (s.length < 2 || s.length > 32) return null;
+  if (!/^[a-zA-Z0-9_.-]+$/.test(s)) return null;
+  return s;
+}
 
 // ============================================
 // User Store
@@ -37,21 +87,25 @@ function findUser(username) {
   return data.users.find(u => u.username === username) || null;
 }
 
-function createUser(username, password, role = 'viewer') {
+function createUser(username, password, role = 'viewer', customPerms = null) {
+  const clean = sanitizeUsername(username);
+  if (!clean) return { ok: false, error: 'Invalid username (2-32 chars, alphanumeric/_.- only)' };
   const data = loadUsers();
-  if (data.users.find(u => u.username === username)) {
+  if (data.users.find(u => u.username === clean)) {
     return { ok: false, error: 'Username already exists' };
   }
   const hash = bcrypt.hashSync(password, SALT_ROUNDS);
+  const permissions = resolvePermissions(role, customPerms);
   data.users.push({
-    username,
+    username: clean,
     password_hash: hash,
     role,
+    permissions,
     created_at: new Date().toISOString(),
     last_login: null,
   });
   saveUsers(data);
-  audit('system', 'admin', 'USER_CREATE', `created user ${username} (${role})`);
+  audit('system', 'admin', 'USER_CREATE', `created user ${clean} (${role})`);
   return { ok: true };
 }
 
@@ -83,11 +137,17 @@ function verifyUserPassword(username, password) {
   if (!user) return null;
   if (!bcrypt.compareSync(password, user.password_hash)) return null;
 
+  // Resolve permissions for existing users without them
+  if (!user.permissions) {
+    user.permissions = resolvePermissions(user.role);
+  }
+
   // Update last_login
   const data = loadUsers();
   const u = data.users.find(x => x.username === username);
   if (u) {
     u.last_login = new Date().toISOString();
+    if (!u.permissions) u.permissions = resolvePermissions(u.role);
     saveUsers(data);
   }
   return user;
@@ -124,9 +184,21 @@ function listUsers() {
   return data.users.map(u => ({
     username: u.username,
     role: u.role,
+    permissions: u.permissions || resolvePermissions(u.role),
     created_at: u.created_at,
     last_login: u.last_login,
   }));
+}
+
+function updateUserPermissions(username, role, customPerms) {
+  const data = loadUsers();
+  const u = data.users.find(x => x.username === username);
+  if (!u) return { ok: false, error: 'User not found' };
+  u.role = role;
+  u.permissions = resolvePermissions(role, customPerms);
+  saveUsers(data);
+  audit('system', 'admin', 'USER_UPDATE', `updated permissions for ${username} (${role})`);
+  return { ok: true };
 }
 
 // ============================================
@@ -156,7 +228,7 @@ function getAuditLog(limit = 100) {
 // ============================================
 // Notifications
 // ============================================
-const NOTIF_FILE = path.join(process.env.HOME || '/root', '.hermes', 'hci-notifications.json');
+const NOTIF_FILE = path.join(HERMES_HOME, 'hci-notifications.json');
 
 function loadNotifications() {
   try {
@@ -210,7 +282,12 @@ module.exports = {
   verifyUserPassword,
   changePassword,
   resetUserPassword,
+  sanitizeUsername,
+  PERMISSIONS,
+  PRESET_PERMISSIONS,
+  resolvePermissions,
   listUsers,
+  updateUserPermissions,
   audit,
   getAuditLog,
   loadNotifications,

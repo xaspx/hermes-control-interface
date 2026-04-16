@@ -46,11 +46,11 @@
 
   --fg: #0b201f;
   --fg-base: #0b201f;
-  --fg-muted: rgba(11, 32, 31, 0.55);
-  --fg-subtle: rgba(11, 32, 31, 0.35);
+  --fg-muted: rgba(11, 32, 31, 0.72);
+  --fg-subtle: rgba(11, 32, 31, 0.50);
 
-  --border: rgba(11, 32, 31, 0.12);
-  --border-strong: rgba(11, 32, 31, 0.22);
+  --border: rgba(11, 32, 31, 0.15);
+  --border-strong: rgba(11, 32, 31, 0.28);
 
   --accent: #2e6fb0;
   --accent-dim: rgba(46, 111, 176, 0.10);
@@ -82,7 +82,7 @@ body {
     radial-gradient(ellipse at 0% 0%, rgba(124, 148, 92, 0.08) 0%, transparent 40%),
     radial-gradient(ellipse at 100% 100%, rgba(111, 154, 195, 0.06) 0%, transparent 40%),
     linear-gradient(180deg, rgba(15,42,40,0.92) 0%, rgba(11,32,31,0.95) 30%, rgba(8,24,23,0.97) 100%),
-    url('https://portal.nousresearch.com/hermes-agent-bg.jpg');
+    url('../assets/hermes-agent-bg.jpg');
   background-size: cover;
   background-position: center;
   background-attachment: fixed;
@@ -112,7 +112,7 @@ body::before {
     radial-gradient(ellipse at 0% 0%, rgba(46, 111, 176, 0.04) 0%, transparent 40%),
     radial-gradient(ellipse at 100% 100%, rgba(124, 148, 92, 0.03) 0%, transparent 40%),
     linear-gradient(180deg, rgba(232,239,227,0.95) 0%, rgba(228,235,223,0.96) 30%, rgba(220,231,215,0.97) 100%),
-    url('https://portal.nousresearch.com/hermes-agent-bg.jpg');
+    url('../assets/hermes-agent-bg.jpg');
   background-size: cover;
   background-position: center;
   background-attachment: fixed;

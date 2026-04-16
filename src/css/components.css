@@ -158,7 +158,7 @@
 
 /* Home image card */
 .home-image-card {
-  background-image: url('https://portal.nousresearch.com/hermes-agent-bg.jpg');
+  background-image: url('../assets/hermes-agent-bg.jpg');
   background-size: cover;
   background-position: center;
   min-height: 200px;
@@ -1093,7 +1093,7 @@
   animation: fadeIn 0.2s ease;
 }
 .modal-card {
-  background: var(--bg);
+  background: var(--bg-base);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   padding: 24px;
@@ -1110,7 +1110,7 @@
 }
 .modal-message {
   font-size: 13px;
-  color: var(--fg-muted);
+  color: var(--fg);
   margin-bottom: 16px;
   line-height: 1.6;
 }
@@ -1332,3 +1332,408 @@
   height: 100vh !important;
 }
 
+/* Phase 1: Session Message Viewer */
+.session-row-active {
+  background: var(--accent-dim) !important;
+}
+
+.session-msg-viewer {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 4px 0 12px 0;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.session-meta-bar {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: 8px 8px 0 0;
+}
+
+.session-meta-bar b {
+  color: var(--fg);
+}
+
+.msg-list {
+  padding: 8px;
+}
+
+.msg-row {
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+  background: var(--bg);
+}
+
+.msg-user {
+  border-left-color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.msg-assistant {
+  border-left-color: #4ade80;
+  background: rgba(74, 222, 128, 0.05);
+}
+
+.msg-tool {
+  border-left-color: #fb923c;
+  background: rgba(251, 146, 60, 0.05);
+}
+
+.msg-system {
+  border-left-color: #9ca3af;
+  background: rgba(156, 163, 175, 0.05);
+}
+
+.msg-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.msg-role {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.msg-time {
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+.msg-content {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Tool call blocks */
+.tool-call-block {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+}
+
+.tool-call-header:hover {
+  background: var(--bg-panel-hover);
+}
+
+.tool-call-icon {
+  font-size: 12px;
+}
+
+.tool-call-name {
+  font-weight: 600;
+  color: #fb923c;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.tool-call-toggle {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+  transition: transform 0.2s;
+}
+
+.tool-call-block.collapsed .tool-call-args {
+  display: none;
+}
+
+.tool-call-block.collapsed .tool-call-toggle {
+  transform: rotate(-90deg);
+}
+
+.tool-call-args {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ============================================
+   Config Editor — Form Fields, Toggles, Secrets
+   ============================================ */
+
+/* Config field container */
+.config-field {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.config-field:last-child { border-bottom: none; }
+
+.config-field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.config-field-meta {
+  font-size: 10px;
+  color: var(--fg-subtle);
+  margin-left: 8px;
+}
+
+/* Text inputs */
+.config-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 12px;
+  outline: none;
+  transition: border-color var(--transition);
+  box-sizing: border-box;
+}
+.config-input:focus { border-color: var(--accent); }
+.config-input::placeholder { color: var(--fg-subtle); }
+.config-input-number { width: 120px; }
+.config-array-input { margin-bottom: 4px; }
+.config-textarea {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 12px;
+  outline: none;
+  resize: vertical;
+  min-height: 60px;
+  transition: border-color var(--transition);
+  box-sizing: border-box;
+}
+.config-textarea:focus { border-color: var(--accent); }
+
+/* Toggle switch */
+.config-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.config-toggle-input { display: none; }
+.config-toggle-slider {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: var(--bg-tertiary);
+  border-radius: 10px;
+  transition: background var(--transition);
+  flex-shrink: 0;
+}
+.config-toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--fg-muted);
+  border-radius: 50%;
+  transition: all var(--transition);
+}
+.config-toggle-input:checked + .config-toggle-slider {
+  background: var(--accent);
+}
+.config-toggle-input:checked + .config-toggle-slider::after {
+  left: 18px;
+  background: #000;
+}
+.config-toggle-text {
+  font-size: 12px;
+  color: var(--fg);
+  min-width: 24px;
+}
+
+/* Edit mode toggle button */
+.config-edit-toggle.active {
+  background: color-mix(in oklab, #ffac02 15%, transparent);
+  border-color: color-mix(in oklab, #ffac02 30%, transparent);
+  color: var(--fg);
+}
+
+/* Nested field */
+.config-field-nested {
+  padding: 4px 0;
+  border-bottom: none;
+}
+.config-nested-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--radius);
+  transition: background var(--transition);
+}
+.config-nested-header:hover { background: var(--bg-panel-hover); }
+.config-nested-arrow {
+  font-size: 10px;
+  color: var(--fg-muted);
+  transition: transform var(--transition);
+}
+.config-field-nested.collapsed .config-nested-arrow { transform: rotate(-90deg); }
+.config-field-nested.collapsed .config-nested-body { display: none; }
+.config-nested-body {
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+  margin-left: 8px;
+}
+
+/* Array items */
+.config-array-items { margin-top: 4px; }
+.config-array-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.config-array-remove {
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+  color: var(--red) !important;
+  flex-shrink: 0;
+}
+.config-array-add {
+  margin-top: 4px;
+  font-size: 11px !important;
+}
+
+/* Secrets tab */
+.config-secret-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.config-secret-row:last-child { border-bottom: none; }
+.config-secret-name {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  min-width: 180px;
+  flex-shrink: 0;
+}
+.config-secret-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.config-secret-masked {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.config-secret-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.config-secret-actions .btn {
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+}
+
+/* Raw YAML display */
+.config-raw-yaml {
+  font-size: 11px;
+  white-space: pre-wrap;
+  max-height: 500px;
+  overflow-y: auto;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  margin: 0;
+}
+
+/* Empty state */
+.config-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9998;
+  animation: fadeIn .15s;
+}
+.modal-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  min-width: 300px;
+  animation: slideUp .2s;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}

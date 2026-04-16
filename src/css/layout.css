@@ -112,7 +112,7 @@
   justify-content: center;
   background:
     color-mix(in oklab, var(--bg-base) 85%, transparent),
-    url('https://portal.nousresearch.com/hermes-agent-bg.jpg');
+    url('../assets/hermes-agent-bg.jpg');
   background-size: cover;
   background-position: center;
   backdrop-filter: blur(20px);

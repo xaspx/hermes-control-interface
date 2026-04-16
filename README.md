@@ -3,7 +3,7 @@
 A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Browser-based terminal, file explorer, session management, cron scheduling, token analytics, and multi-agent administration — all behind a password gate.
 
 **Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js
-**Version:** 3.1.0
+**Version:** 3.2.0
 
 ---
 
@@ -206,6 +206,35 @@ See `docs/API.md` for full reference.
 
 Full audit: `docs/SECURITY-AUDIT-2.md`
 Score: 9.1/10 — Production-ready with caveats.
+
+## Changelog
+
+### v3.2.0 (2026-04-14)
+**Performance:**
+- Insights speed: 60s+ timeout → 0.65s via IPv4 adapter on model_metadata.py
+- Timeouts reduced: 10s → 5s (model metadata), 5s → 3s (llama.cpp props)
+
+**Security:**
+- WebSocket origin: exact match (was substring check)
+- Body limit: 10MB → 1MB global, 10MB only on avatar upload
+- Temp files: `crypto.randomUUID()` (predictable paths removed)
+- Skills install/uninstall: `execHermes()` instead of shell interpolation
+- Username validation: 2-32 chars, alphanumeric/_.- only
+
+**Features:**
+- Log tabs: Agent, Error, and Gateway logs now working
+- Non-root user support: dynamic HCI identity, HOME-aware paths
+- Gateway service: auto-detect `hermes-gateway-<profile>` for non-root
+
+**Fixes:**
+- Terminal flow: transcript handling after sendCommand
+- XSS: 15+ escaped user-facing error messages
+- Auth panel: data loaded async, doesn't block page load
+- CPR stripping: removed ANSI escape from terminal
+
+### v3.1.0 (2026-04-12)
+- Skills Hub + Honcho panel + Gateway connections
+- HTTPS support
 
 ## License
 
