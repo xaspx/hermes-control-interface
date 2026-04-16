@@ -19,7 +19,109 @@ A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousRes
 
 ---
 
+## Where HCI Can Be Installed
+
+HCI runs as a single Node.js process — any server environment that supports Node.js works.
+
+| Environment | Status | Notes |
+|---|---|---|
+| Local Linux server | ✅ | Full support |
+| VPS (DigitalOcean, Hetzner, AWS EC2, Linode, etc.) | ✅ | Recommended for production |
+| macOS | ✅ | Works |
+| WSL2 (Windows Subsystem for Linux) | ✅ | Full support |
+| Raspberry Pi (arm64) | ✅ | Works |
+| Docker / Podman | ⚠️ | Works but not officially supported |
+| Shared hosting | ❌ | Requires Node.js + WebSocket + PTY support |
+| Browser-only (no server) | ❌ | Requires Node.js backend |
+
+---
+
+## Requirements
+
+| Requirement | Minimum | Recommended |
+|---|---|---|
+| Node.js | v18+ | v20 LTS |
+| RAM | 512 MB | 1 GB+ |
+| Disk | 200 MB | 500 MB+ |
+| OS | Linux / macOS / WSL2 | Ubuntu 22.04 LTS |
+| Hermes Agent | v3.x | Latest |
+| Build tools | python3, make, g++ | For node-pty native module |
+
+**Dependencies** (installed via `npm install`):
+- `express` — HTTP server
+- `ws` — WebSocket
+- `node-pty` — PTY support (requires build tools)
+- `xterm.js` — Terminal emulator in browser
+- `bcrypt` — Password hashing
+- `cookie-parser`, `dotenv`, `js-yaml`, etc.
+
+---
+
+## Installation Methods
+
+### Manual (Recommended)
+
+```bash
+# 1. Clone
+git clone https://github.com/xaspx/hermes-control-interface.git
+cd hermes-control-interface
+
+# 2. Install dependencies
+npm install
+
+# 3. Configure
+cp .env.example .env
+# Edit .env and set:
+#   HERMES_CONTROL_PASSWORD=your-secure-password
+#   HERMES_CONTROL_SECRET=$(openssl rand -hex 32)
+
+# 4. Build frontend
+npm run build
+
+# 5. Start
+npm start
+```
+
+Access at `http://localhost:10272` (default PORT).
+
+### Systemd Service (Production)
+
+```bash
+# Use the provided gateway service script as reference
+bash scripts/setup-gateway-service.sh
+```
+
+Or create a simple systemd unit:
+
+```ini
+# /etc/systemd/system/hermes-control.service
+[Unit]
+Description=Hermes Control Interface
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/path/to/hermes-control-interface
+ExecStart=/usr/bin/node server.js
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable hermes-control
+sudo systemctl start hermes-control
+```
+
+---
+
 ## Screenshots
+
+### Navigation — 8 Pages
+
+**Home · Agents · Usage · Skills · Chat · Logs · Maintenance · Files**
 
 ### Dark Mode
 
@@ -27,8 +129,8 @@ A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousRes
 |------|--------|
 | ![Home](docs/screenshots/dark/01-home.png) | ![Agents](docs/screenshots/dark/02-agents.png) |
 
-| Chat (NEW) | Usage & Analytics |
-|------------|------------------|
+| Chat | Usage & Analytics |
+|------|------------------|
 | ![Chat](docs/screenshots/dark/chat.png) | ![Usage](docs/screenshots/dark/03-usage.png) |
 
 | Skills Hub | Maintenance |
@@ -290,7 +392,7 @@ npm install
 cp .env.example .env
 # Edit .env:
 #   HERMES_CONTROL_PASSWORD=your-secure-password
-#   HERMES_CONTROL_SECRET=a-random-secret-string
+#   HERMES_CONTROL_SECRET=$(openssl rand -hex 32)
 
 # Build frontend
 npm run build
@@ -313,6 +415,31 @@ Access at `http://localhost:10272` (default PORT).
 | `HERMES_CONTROL_HOME` | No | Hermes home dir (default: ~/.hermes) |
 | `HERMES_CONTROL_ROOTS` | No | File explorer roots (JSON array) |
 | `HERMES_PROJECTS_ROOT` | No | Projects directory |
+
+---
+
+## Reset Password Without Dashboard Access
+
+If you can't log in to the dashboard, reset the password via CLI:
+
+**Option 1 — Edit .env directly**
+```bash
+# SSH into your server
+nano ~/.hermes/.env
+# Change HERMES_CONTROL_PASSWORD=your-new-password
+
+# Restart
+sudo systemctl restart hermes-control
+# or: pkill node; npm start &
+```
+
+**Option 2 — Generate bcrypt hash via Node.js**
+```bash
+node -e "const bcrypt=require('bcrypt'); bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10).then(h=>console.log('HERMES_CONTROL_PASSWORD='+h))"
+# Copy the output to .env, then restart
+```
+
+**Key point:** `.env` is the source of truth. Dashboard access = server access. If you lose access to both, you must have server/SSH access to reset.
 
 ---
 
