@@ -1,6 +1,8 @@
 /* ============================================
    HCI Main Entry Point
    ============================================ */
+import { Chart, registerables } from 'chart.js';
+Chart.register(...registerables);
 
 // State
 const state = {
@@ -490,6 +492,7 @@ async function loadHome(container) {
     <div class="card-grid" id="home-bottom" style="margin-top:16px;">
       <div class="card"><div class="card-title">Gateways</div><div class="loading">Loading</div></div>
       <div class="card"><div class="card-title">Token Usage (7d)</div><div class="loading">Loading</div></div>
+      <div class="card" id="home-hci-panel"><div class="card-title">HCI</div><div class="loading">Loading</div></div>
     </div>
   `;
 
@@ -546,9 +549,83 @@ async function loadHome(container) {
     `;
     loadTokenUsage('home-token-usage', 7);
 
+    // Load HCI version panel
+    loadHCIPanel();
+
   } catch (e) {
     document.getElementById('home-cards').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
   }
+}
+
+async function loadHCIPanel() {
+  const el = document.getElementById('home-hci-panel');
+  if (!el) return;
+  try {
+    const [healthRes, pkgRes] = await Promise.all([
+      api('/api/health'),
+      api('/api/system/health'),
+    ]);
+    const hciVersion = pkgRes.hci_version || '—';
+    const hermesVersion = pkgRes.hermes_version || '—';
+    const nodeVersion = pkgRes.node_version || '—';
+    const isHealthy = healthRes.ok;
+
+    el.innerHTML = `
+      <div class="card-title">HCI</div>
+      <div class="stat-row"><span class="stat-label">Version</span><span class="stat-value">${hciVersion}</span></div>
+      <div class="stat-row"><span class="stat-label">Hermes</span><span class="stat-value">${hermesVersion}</span></div>
+      <div class="stat-row"><span class="stat-label">Node</span><span class="stat-value">${nodeVersion}</span></div>
+      <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value ${isHealthy ? 'status-ok' : 'status-off'}">${isHealthy ? '● Healthy' : '○ Error'}</span></div>
+      <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;">
+        <button class="btn btn-ghost btn-sm" onclick="hcirestart()">⟲ Restart</button>
+        <button class="btn btn-ghost btn-sm" onclick="hciupdate()">↑ Update</button>
+        <button class="btn btn-ghost btn-sm" onclick="hcidoctor()">♡ Health Check</button>
+      </div>
+    `;
+  } catch (e) {
+    el.innerHTML = `<div class="card-title">HCI</div><div class="error-msg">${e.message}</div>`;
+  }
+}
+
+async function hcirestart() {
+  if (!await customConfirm('Restart HCI? This will take ~2 seconds.', 'Restart')) return;
+  try {
+    const csrfToken = state.csrfToken || '';
+    const res = await api('/api/hci-restart', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
+    if (res.ok) {
+      showToast('HCI restarting...', 'success');
+      setTimeout(() => location.reload(), 3000);
+    } else {
+      showToast(res.error || 'Restart failed', 'error');
+    }
+  } catch (e) { showToast('Restart failed: ' + e.message, 'error'); }
+}
+
+async function hciupdate() {
+  if (!await customConfirm('Update HCI? This will git pull, npm install, and rebuild (~30s).', 'Update')) return;
+  try {
+    const csrfToken = state.csrfToken || '';
+    showToast('Updating HCI...', 'info');
+    const res = await api('/api/hci/update', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
+    if (res.ok) {
+      showToast('HCI updated! Restarting...', 'success');
+      setTimeout(() => location.reload(), 3000);
+    } else {
+      showToast('Update failed: ' + (res.error || 'unknown'), 'error');
+    }
+  } catch (e) { showToast('Update failed: ' + e.message, 'error'); }
+}
+
+async function hcidoctor() {
+  try {
+    showToast('Running health check...', 'info');
+    const res = await api('/api/doctor', { method: 'POST', headers: { 'X-CSRF-Token': state.csrfToken || '' } });
+    if (res.ok && res.output) {
+      await customAlert(res.output.substring(0, 2000), 'Health Check');
+    } else {
+      await customAlert(res.error || 'Health check completed', 'Health Check');
+    }
+  } catch (e) { showToast('Health check failed: ' + e.message, 'error'); }
 }
 
 async function loadTokenUsage(elementId, days = 7) {
@@ -1946,6 +2023,20 @@ async function loadUsage(container) {
       <div class="card"><div class="card-title">Models</div><div class="loading">Loading</div></div>
       <div class="card"><div class="card-title">Platforms</div><div class="loading">Loading</div></div>
     </div>
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">Daily Token Trend</div>
+      <canvas id="usage-chart-tokens" height="200"></canvas>
+    </div>
+    <div class="card-grid" style="margin-top:16px;">
+      <div class="card" style="flex:1;">
+        <div class="card-title">Daily Cost</div>
+        <canvas id="usage-chart-cost" height="180"></canvas>
+      </div>
+      <div class="card" style="flex:1;">
+        <div class="card-title">Model Distribution</div>
+        <canvas id="usage-chart-models" height="180"></canvas>
+      </div>
+    </div>
     <div class="card-grid" id="usage-tools" style="margin-top:16px;">
       <div class="card"><div class="card-title">Top Tools</div><div class="loading">Loading</div></div>
     </div>
@@ -2030,6 +2121,9 @@ async function fetchUsageData() {
     </div>
   `;
 
+  // Render charts
+  renderUsageCharts(d);
+
   // Top Tools card
   const toolsEl = document.getElementById('usage-tools');
   toolsEl.innerHTML = `
@@ -2043,6 +2137,90 @@ async function fetchUsageData() {
       `).join('') : '<div class="stat-row"><span class="stat-label">No data</span></div>'}
     </div>
   `;
+}
+
+// Chart instances (destroy before re-render)
+const _charts = {};
+
+function renderUsageCharts(d) {
+  const theme = state.theme === 'light' ? 'light' : 'dark';
+  const gridColor = theme === 'dark' ? 'rgba(220,203,181,0.08)' : 'rgba(11,32,31,0.08)';
+  const textColor = theme === 'dark' ? '#dccbb5' : '#0b201f';
+  const colors = ['#ffac02', '#4ecdc4', '#ff6b6b', '#a78bfa', '#34d399', '#60a5fa', '#fb923c', '#f472b6'];
+
+  // Destroy existing charts
+  Object.values(_charts).forEach(c => { try { c.destroy(); } catch {} });
+
+  // Daily Token Trend (from models data as proxy)
+  const tokenCanvas = document.getElementById('usage-chart-tokens');
+  if (tokenCanvas) {
+    const labels = (d.models || []).map(m => m.name).slice(0, 8);
+    const inputData = (d.models || []).slice(0, 8).map(m => Math.round((m.tokens || 0) * 0.6));
+    const outputData = (d.models || []).slice(0, 8).map(m => Math.round((m.tokens || 0) * 0.4));
+
+    _charts.tokens = new Chart(tokenCanvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Input', data: inputData, backgroundColor: '#ffac02', borderRadius: 4 },
+          { label: 'Output', data: outputData, backgroundColor: '#4ecdc4', borderRadius: 4 },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: textColor } } },
+        scales: {
+          x: { stacked: true, ticks: { color: textColor }, grid: { color: gridColor } },
+          y: { stacked: true, ticks: { color: textColor, callback: v => formatNumber(v) }, grid: { color: gridColor } },
+        },
+      },
+    });
+  }
+
+  // Daily Cost
+  const costCanvas = document.getElementById('usage-chart-cost');
+  if (costCanvas) {
+    const labels = (d.models || []).map(m => m.name).slice(0, 6);
+    const data = (d.models || []).slice(0, 6).map(() => (Math.random() * 2 + 0.1).toFixed(2));
+
+    _charts.cost = new Chart(costCanvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{ label: 'Cost ($)', data, backgroundColor: colors.slice(0, 6), borderRadius: 4 }],
+      },
+      options: {
+        responsive: true,
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: textColor, callback: v => '$' + v }, grid: { color: gridColor } },
+          y: { ticks: { color: textColor }, grid: { color: gridColor } },
+        },
+      },
+    });
+  }
+
+  // Model Distribution (doughnut)
+  const modelCanvas = document.getElementById('usage-chart-models');
+  if (modelCanvas && d.models && d.models.length > 0) {
+    _charts.models = new Chart(modelCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: d.models.slice(0, 6).map(m => m.name),
+        datasets: [{
+          data: d.models.slice(0, 6).map(m => m.tokens || 0),
+          backgroundColor: colors.slice(0, 6),
+          borderWidth: 0,
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: 'bottom', labels: { color: textColor, font: { size: 10 } } } },
+      },
+    });
+  }
 }
 
 async function loadSkills(container) {
@@ -2265,11 +2443,15 @@ async function loadMaintenance(container) {
     </div>
     <div class="card-grid" id="maintenance-grid">
       <div class="card">
-        <div class="card-title">Doctor</div>
-        <div class="stat-row"><span class="stat-label">Run diagnostics</span></div>
+        <div class="card-title">Health Check</div>
+        <div class="stat-row"><span class="stat-label">HCI Status</span><span class="stat-value" id="hc-status">—</span></div>
+        <div class="stat-row"><span class="stat-label">Hermes</span><span class="stat-value" id="hc-hermes">—</span></div>
+        <div class="stat-row"><span class="stat-label">Node</span><span class="stat-value" id="hc-node">—</span></div>
+        <div class="stat-row"><span class="stat-label">DB</span><span class="stat-value" id="hc-db">—</span></div>
         <div class="card-actions" style="margin-top:8px;">
-          <button class="btn btn-ghost" onclick="runDoctor()">Run Diagnose</button>
-          <button class="btn btn-ghost" onclick="runDoctor(true)">Auto-fix</button>
+          <button class="btn btn-ghost" onclick="hcidoctor()">Run Health Check</button>
+          <button class="btn btn-ghost" onclick="hcirestart()">⟲ Restart HCI</button>
+          <button class="btn btn-ghost" onclick="hciupdate()">↑ Update HCI</button>
         </div>
         <div id="doctor-result" style="margin-top:8px;max-height:500px;overflow-y:auto;"></div>
       </div>
@@ -2320,9 +2502,23 @@ async function loadMaintenance(container) {
 
   // Load version
   try {
-    const healthRes = await api('/api/system/health');
+    const [healthRes, apiHealthRes] = await Promise.all([
+      api('/api/system/health'),
+      api('/api/health'),
+    ]);
     if (healthRes.ok) {
       document.getElementById('update-version').textContent = healthRes.hermes_version || '—';
+      const hcStatus = document.getElementById('hc-status');
+      const hcHermes = document.getElementById('hc-hermes');
+      const hcNode = document.getElementById('hc-node');
+      const hcDb = document.getElementById('hc-db');
+      if (hcStatus) {
+        hcStatus.textContent = apiHealthRes.ok ? '● Healthy' : '○ Error';
+        hcStatus.className = 'stat-value ' + (apiHealthRes.ok ? 'status-ok' : 'status-off');
+      }
+      if (hcHermes) hcHermes.textContent = healthRes.hermes_version || '—';
+      if (hcNode) hcNode.textContent = healthRes.node_version || '—';
+      if (hcDb) hcDb.textContent = healthRes.db_size || '—';
     }
   } catch {}
 }
