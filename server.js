@@ -3755,10 +3755,45 @@ app.post('/api/profiles/create', requireRole('admin'), async (req, res) => {
     const output = await shell(`${cmd} 2>&1`);
     audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'PROFILE_CREATE', safeName);
     addNotification('success', `Profile created: ${safeName}`);
-    // Auto-install gateway service
+
+    // Auto-inject Gateway API config + install gateway service
     try {
       await shell(`bash /root/projects/hci-staging/scripts/setup-gateway-service.sh --profile ${safeName} --user root --force 2>&1`, '30s');
     } catch {}
+    // Auto-inject api_server config for Gateway API chat
+    try {
+      const confPath = path.join(HERMES_HOME, 'profiles', safeName, 'config.yaml');
+      if (fs.existsSync(confPath)) {
+        let raw = fs.readFileSync(confPath, 'utf8');
+        const cfg = yaml.load(raw) || {};
+        if (!cfg.platforms?.api_server?.enabled) {
+          // Find next available port
+          const usedPorts = new Set(Object.values(discoverGatewayPorts()));
+          let port = 8650;
+          while (usedPorts.has(port)) port++;
+          // Inject platforms config at top level
+          cfg.platforms = cfg.platforms || {};
+          cfg.platforms.api_server = {
+            enabled: true,
+            extra: {
+              host: '127.0.0.1',
+              port,
+              key: GATEWAY_API_KEY,
+              cors_origins: 'https://agent2.panji.me,https://agent.panji.me',
+            },
+          };
+          fs.writeFileSync(confPath, yaml.dump(cfg, { lineWidth: 120 }));
+          // Start gateway service
+          try { await shell(`systemctl restart hermes-gateway-${safeName} 2>&1`, '15s'); } catch {}
+          // Refresh port discovery
+          gatewayPorts = discoverGatewayPorts();
+          addNotification('info', `Gateway API enabled on port ${port} for ${safeName}`);
+        }
+      }
+    } catch (apiErr) {
+      addNotification('warning', `Profile created but Gateway API setup failed: ${apiErr.message}`);
+    }
+
     // Invalidate cache
     getProfiles.cache = { at: 0, data: [] };
     res.json({ ok: true, output });

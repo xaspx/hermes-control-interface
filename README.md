@@ -305,7 +305,7 @@ HCI runs as a single Node.js process — any server environment that supports No
 | RAM | 512 MB | 1 GB+ |
 | Disk | 200 MB | 500 MB+ |
 | OS | Linux / macOS / WSL2 | Ubuntu 22.04 LTS |
-| Hermes Agent | v3.x | Latest |
+| Hermes Agent | v0.3.x | Latest |
 | Build tools | python3, make, g++ | For node-pty native module |
 
 **Dependencies** (installed via `npm install`):
