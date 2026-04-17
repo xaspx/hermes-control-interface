@@ -12,6 +12,11 @@ const pty = require('node-pty');
 const { WebSocketServer } = require('ws');
 const rateLimit = require('express-rate-limit');
 const yaml = require('js-yaml');
+const Database = require('better-sqlite3');
+const {
+  mergeSessionsFromSources,
+  parseHermesSessionsList,
+} = require('./lib/session-list');
 
 // ── LLM Pricing (via @pydantic/genai-prices) ──
 const { calcPrice } = require('@pydantic/genai-prices');
@@ -136,6 +141,7 @@ function clearAuthCookie(res) {
 const CONTROL_HOME = process.env.HERMES_CONTROL_HOME || path.join(os.homedir(), '.hermes');
 const CONTROL_STATE_DIR = path.join(CONTROL_HOME, 'control-interface');
 const AVATAR_OVERRIDE_PATH = path.join(CONTROL_STATE_DIR, 'avatar.dataurl');
+const STATE_DB_PATH = path.join(CONTROL_HOME, 'state.db');
 
 function parseExplorerRoots(raw) {
   if (!raw) return null;
@@ -835,26 +841,6 @@ function getProjects() {
   }
 }
 
-function parseHermesSessionsList(raw) {
-  const lines = String(raw || '').split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
-  const dataLines = lines.filter((line) =>
-    !/^Title\s+Preview\s+Last Active\s+ID$/i.test(line) &&
-    !/^[─\-]+$/.test(line) &&
-    !/^(Preview|Title|Last Active|Src)\s+(Preview|Title|Last Active|Src)/i.test(line)
-  );
-  return dataLines.map((line) => {
-    const parts = line.trim().split(/\s{2,}/);
-    if (parts.length < 4) return null;
-    const [title, preview, lastActive, id] = parts;
-    return {
-      id: String(id || '').trim(),
-      title: String(title || '').trim() || '—',
-      preview: String(preview || '').trim() || '—',
-      lastActive: String(lastActive || '').trim() || '—',
-    };
-  }).filter(Boolean);
-}
-
 function readLayoutStore() {
   try {
     const raw = fs.readFileSync(layoutStorePath, 'utf8');
@@ -1013,13 +999,10 @@ async function getSessions() {
   if (hermesSidebarSessionsCache.data.length && now - hermesSidebarSessionsCache.at < 10_000) {
     return hermesSidebarSessionsCache.data;
   }
-  const raw = await shell('hermes sessions list --limit 10');
-  if (raw) {
-    const data = parseHermesSessionsList(raw);
-    if (data.length) {
-      hermesSidebarSessionsCache = { at: now, data };
-      return data;
-    }
+  const data = await getAllSessions().then((sessions) => sessions.slice(0, 10)).catch(() => []);
+  if (data.length) {
+    hermesSidebarSessionsCache = { at: now, data };
+    return data;
   }
   // Preserve existing cache on error — don't clobber with empty fallback
   if (hermesSidebarSessionsCache.data.length) {
@@ -1035,6 +1018,46 @@ async function getSessions() {
 
 let hermesAllSessionsCache = { at: 0, data: [] };
 
+function getStateDbPath(profile) {
+  return profile && profile !== 'default'
+    ? path.join(os.homedir(), '.hermes', 'profiles', profile, 'state.db')
+    : STATE_DB_PATH;
+}
+
+function loadSessionsFromDb(stateDbPath, limit = 250) {
+  if (!fs.existsSync(stateDbPath)) return { dbSessions: [], previewBySessionId: {} };
+
+  const db = new Database(stateDbPath, { readonly: true });
+  try {
+    const dbSessions = db.prepare(`
+      SELECT id, title, parent_session_id, started_at, ended_at, message_count, source
+      FROM sessions
+      ORDER BY COALESCE(ended_at, started_at) DESC, id DESC
+      LIMIT ?
+    `).all(limit);
+
+    const previewRows = db.prepare(`
+      SELECT session_id, content
+      FROM messages
+      WHERE id IN (
+        SELECT MAX(id)
+        FROM messages
+        WHERE content IS NOT NULL AND TRIM(content) != ''
+        GROUP BY session_id
+      )
+    `).all();
+
+    const previewBySessionId = {};
+    for (const row of previewRows) {
+      previewBySessionId[row.session_id] = row.content;
+    }
+
+    return { dbSessions, previewBySessionId };
+  } finally {
+    db.close();
+  }
+}
+
 async function getAllSessions(profile) {
   const now = Date.now();
   const cacheKey = profile || 'all';
@@ -1044,31 +1067,29 @@ async function getAllSessions(profile) {
   const cmd = profile ? `hermes -p ${profile} sessions list --limit 250` : 'hermes sessions list --limit 250';
   const raw = await shell(cmd);
   if (raw) {
-    const data = parseHermesSessionsList(raw);
-    // Enrich with message counts from state.db
-    try {
-      const stateDbPath = profile && profile !== 'default'
-        ? path.join(os.homedir(), '.hermes', 'profiles', profile, 'state.db')
-        : STATE_DB_PATH;
-      if (fs.existsSync(stateDbPath)) {
-        const db = new Database(stateDbPath, { readonly: true });
-        try {
-          const counts = db.prepare('SELECT id, message_count, title FROM sessions').all();
-          const countMap = {};
-          for (const c of counts) countMap[c.id] = { message_count: c.message_count || 0, dbTitle: c.title };
-          for (const s of data) {
-            const info = countMap[s.id];
-            if (info) {
-              s.messageCount = info.message_count;
-              if ((!s.title || s.title === '—') && info.dbTitle) s.title = info.dbTitle;
-            }
-          }
-        } finally { db.close(); }
-      }
-    } catch {}
+    const cliSessions = parseHermesSessionsList(raw);
+    const stateDbPath = getStateDbPath(profile);
+    const { dbSessions, previewBySessionId } = loadSessionsFromDb(stateDbPath);
+    const data = mergeSessionsFromSources({
+      cliSessions,
+      dbSessions,
+      previewBySessionId,
+      nowMs: now,
+    });
     hermesAllSessionsCache = { at: now, data, key: cacheKey };
     return data;
   }
+
+  try {
+    const stateDbPath = getStateDbPath(profile);
+    const { dbSessions, previewBySessionId } = loadSessionsFromDb(stateDbPath);
+    const data = mergeSessionsFromSources({ dbSessions, previewBySessionId, nowMs: now });
+    if (data.length) {
+      hermesAllSessionsCache = { at: now, data, key: cacheKey };
+      return data;
+    }
+  } catch {}
+
   // No fallback to old cache — return empty if command returned nothing
   return [];
 }
@@ -3068,8 +3089,6 @@ app.get('/api/sessions/:id/export', requireAuth, async (req, res) => {
 });
 
 // Session messages — Phase 1: Message Viewer
-const Database = require('better-sqlite3');
-const STATE_DB_PATH = path.join(CONTROL_HOME, 'state.db');
 
 app.get('/api/sessions/:id/messages', requireAuth, (req, res) => {
   try {
