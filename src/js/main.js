@@ -2947,7 +2947,7 @@ async function loadAuditLogPage() {
     const el = document.getElementById('audit-log-page');
     if (data.ok && data.entries) {
       const limit = state.auditDisplayLimit;
-      const all = data.entries.slice(-limit).reverse();
+      const all = data.entries.slice(0, limit);
       let html = all.map(e => {
         const m = e.match(/\[(.+?)\]\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+)/);
         if (m) {
