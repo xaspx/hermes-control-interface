@@ -378,33 +378,6 @@ See full security audit: [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)
 
 ---
 
-## Quick Start
-
-```bash
-# Clone
-git clone https://github.com/xaspx/hermes-control-interface.git
-cd hermes-control-interface
-
-# Install
-npm install
-
-# Configure
-cp .env.example .env
-# Edit .env:
-#   HERMES_CONTROL_PASSWORD=your-secure-password
-#   HERMES_CONTROL_SECRET=$(openssl rand -hex 32)
-
-# Build frontend
-npm run build
-
-# Start
-npm start
-```
-
-Access at `http://localhost:10272` (default PORT).
-
----
-
 ## Environment Variables
 
 | Variable | Required | Description |
