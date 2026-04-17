@@ -2,6 +2,7 @@
    HCI Main Entry Point
    ============================================ */
 import { Chart, registerables } from 'chart.js';
+import { toDisplayText } from './chat-render-utils.mjs';
 Chart.register(...registerables);
 
 // State
@@ -388,7 +389,7 @@ async function refreshChatSidebar() {
 
     const currentSid = state._currentChatSession;
     listEl.innerHTML = sessions.slice(0, 50).map(s => {
-      const title = (s.title && s.title !== '—') ? s.title : s.id;
+      const title = toDisplayText((s.title && s.title !== '—') ? s.title : s.id);
       const isActive = s.id == currentSid;
       const msgs = s.messageCount || s.message_count || 0;
       const model = s.model || '';
@@ -425,7 +426,7 @@ async function loadChatSession(sessionId) {
     const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
     if (!r.ok) { container.innerHTML = '<div class="error-msg">Failed to load messages</div>'; return; }
     const data = await r.json();
-    if (titleEl) titleEl.textContent = data.title || ('Session ' + sessionId);
+    if (titleEl) titleEl.textContent = toDisplayText(data.title ?? ('Session ' + sessionId));
     if (subtitleEl) subtitleEl.textContent = `${data.messages?.length || 0} messages · ${profile}`;
 
     // Token info
@@ -499,20 +500,20 @@ function renderChatMessage(msg) {
   if (role === 'tool') {
     const contentDiv = document.createElement('div');
     contentDiv.style.cssText = 'font-size:12px;line-height:1.6;color:var(--fg);white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;background:var(--bg-panel);padding:8px;border-radius:6px;';
-    let content = msg.content || '';
+    let content = msg.content;
     try {
       const parsed = JSON.parse(content);
       if (parsed.summary) content = parsed.summary;
       else if (parsed.results) content = JSON.stringify(parsed.results, null, 2);
       else content = JSON.stringify(parsed, null, 2);
     } catch {}
-    contentDiv.textContent = content.substring(0, 2000);
+    contentDiv.textContent = toDisplayText(content).substring(0, 2000);
     div.appendChild(contentDiv);
     return div;
   }
 
   // Content
-  let content = msg.content || '';
+  let content = toDisplayText(msg.content);
   content = content.replace(/^Resume this session with:.*$/gm, '');
   content = content.replace(/^Session:\s*\d+.*$/gm, '');
   content = content.replace(/^Duration:.*$/gm, '');
@@ -530,7 +531,7 @@ function renderChatMessage(msg) {
   if (msg.reasoning) {
     const rd = document.createElement('details');
     rd.style.cssText = 'margin-top:8px;';
-    rd.innerHTML = `<summary style="cursor:pointer;font-size:11px;color:var(--fg-subtle);">💭 Reasoning</summary><div style="font-size:11px;color:var(--fg-muted);line-height:1.5;white-space:pre-wrap;padding:6px;background:var(--bg-panel);border-radius:4px;margin-top:4px;max-height:150px;overflow-y:auto;">${escapeHtml(msg.reasoning.substring(0, 2000))}</div>`;
+    rd.innerHTML = `<summary style="cursor:pointer;font-size:11px;color:var(--fg-subtle);">💭 Reasoning</summary><div style="font-size:11px;color:var(--fg-muted);line-height:1.5;white-space:pre-wrap;padding:6px;background:var(--bg-panel);border-radius:4px;margin-top:4px;max-height:150px;overflow-y:auto;">${escapeHtml(toDisplayText(msg.reasoning).substring(0, 2000))}</div>`;
     div.appendChild(rd);
   }
 
@@ -705,7 +706,7 @@ async function sendChatMessage() {
 
 function renderChatContent(text) {
   // Simple markdown-like rendering: code blocks, bold, line breaks
-  let html = escapeHtml(text);
+  let html = escapeHtml(toDisplayText(text));
   // Code blocks ```...```
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre style="background:var(--bg-panel);padding:8px;border-radius:4px;overflow-x:auto;font-size:12px;margin:6px 0;"><code>$2</code></pre>');
   // Inline code
@@ -1325,11 +1326,12 @@ async function loadAgentSessions(container, name) {
 
   function renderSessions(filter = '') {
     const sessions = state.currentSessions || [];
-    const filtered = filter
+    const filterText = toDisplayText(filter).toLowerCase();
+    const filtered = filterText
       ? sessions.filter(s =>
-          (s.title || '').toLowerCase().includes(filter) ||
-          (s.id || '').toLowerCase().includes(filter) ||
-          (s.source || '').toLowerCase().includes(filter)
+          toDisplayText(s.title).toLowerCase().includes(filterText) ||
+          toDisplayText(s.id).toLowerCase().includes(filterText) ||
+          toDisplayText(s.source).toLowerCase().includes(filterText)
         )
       : sessions;
 
@@ -1460,7 +1462,7 @@ async function toggleSessionDetail(btn, sessionId, profile) {
       };
       const rc = roleColors[m.role] || roleColors.system;
       const ts = m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-      let content = m.content || '';
+      let content = toDisplayText(m.content);
       content = content.replace(/Resume this session with:.*$/gm, '');
       content = content.replace(/^Session:\s*\d+.*$/gm, '');
       content = content.replace(/^Duration:.*$/gm, '');
