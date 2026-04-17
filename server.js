@@ -2619,7 +2619,7 @@ app.post('/api/hci/update', requireRole('admin'), (req, res) => {
     res.end();
     // Spawn restart script — same pattern as /api/hci-restart
     // Server stays alive until fuser -k kills it, then new one starts
-    const restartScript = `sleep 3 && fuser -k ${PORT}/tcp 2>/dev/null; sleep 1 && cd ${PROJECT_ROOT} && nohup node server.js &>/dev/null &`;
+    const restartScript = `sleep 3 && fuser -k ${PORT}/tcp 2>/dev/null; sleep 1 && cd ${PROJECT_ROOT} && nohup node server.js &>/tmp/hci-staging.log &`;
     spawn('sh', ['-c', restartScript], { detached: true, stdio: 'ignore' }).unref();
     // No process.exit(0) — fuser -k will kill us cleanly
   })();
@@ -3357,7 +3357,7 @@ app.post('/api/hci-restart', requireRole('admin'), (req, res) => {
   audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'HCI_RESTART', 'initiated');
   res.json({ ok: true, message: 'HCI restarting in 2 seconds...' });
   // Delayed restart: let response flush, then kill and restart
-  const script = `sleep 2 && fuser -k ${PORT}/tcp 2>/dev/null; sleep 1 && cd ${PROJECT_ROOT} && nohup node server.js &>/dev/null &`;
+  const script = `sleep 2 && fuser -k ${PORT}/tcp 2>/dev/null; sleep 1 && cd ${PROJECT_ROOT} && nohup node server.js &>/tmp/hci-staging.log &`;
   spawn('sh', ['-c', script], {
     detached: true,
     stdio: 'ignore',
@@ -3763,9 +3763,11 @@ app.post('/api/profiles/create', requireRole('admin'), async (req, res) => {
     // Auto-inject api_server config for Gateway API chat
     try {
       const confPath = path.join(HERMES_HOME, 'profiles', safeName, 'config.yaml');
+      console.log(`[ProfileCreate] Checking config at: ${confPath}, exists: ${fs.existsSync(confPath)}`);
       if (fs.existsSync(confPath)) {
         let raw = fs.readFileSync(confPath, 'utf8');
         const cfg = yaml.load(raw) || {};
+        console.log(`[ProfileCreate] Config loaded, platforms: ${JSON.stringify(cfg.platforms)}`);
         if (!cfg.platforms?.api_server?.enabled) {
           // Find next available port
           const usedPorts = new Set(Object.values(discoverGatewayPorts()));
@@ -3783,14 +3785,18 @@ app.post('/api/profiles/create', requireRole('admin'), async (req, res) => {
             },
           };
           fs.writeFileSync(confPath, yaml.dump(cfg, { lineWidth: 120 }));
+          console.log(`[ProfileCreate] Injected api_server on port ${port} for ${safeName}`);
           // Start gateway service
           try { await shell(`systemctl restart hermes-gateway-${safeName} 2>&1`, '15s'); } catch {}
           // Refresh port discovery
           gatewayPorts = discoverGatewayPorts();
           addNotification('info', `Gateway API enabled on port ${port} for ${safeName}`);
+        } else {
+          console.log(`[ProfileCreate] api_server already enabled for ${safeName}, skipping`);
         }
       }
     } catch (apiErr) {
+      console.error(`[ProfileCreate] Gateway API setup failed for ${safeName}:`, apiErr.message);
       addNotification('warning', `Profile created but Gateway API setup failed: ${apiErr.message}`);
     }
 
