@@ -1302,22 +1302,31 @@ async function runHCIUpdate() {
   });
 }
 
-async function checkHCIUpdates() {
-  const res = await api('/api/hci/check-update');
-  if (!res.ok) { showModal({ title: 'Error', message: res.error || 'Failed to check updates', buttons: [{ text: 'OK', value: true }] }); return; }
-  // Update version display
-  const versionEl = document.getElementById('hci-current-version');
-  if (versionEl) versionEl.textContent = res.local.version || '—';
-  const hashEl = document.getElementById('hci-current-commit');
-  if (hashEl) hashEl.textContent = res.local.hash || '—';
-  const branchEl = document.getElementById('hci-current-branch');
-  if (branchEl) branchEl.textContent = res.branch || '—';
-  const behindEl = document.getElementById('hci-commits-behind');
-  if (behindEl) behindEl.textContent = res.behind;
-  const behindBadge = document.getElementById('hci-behind-badge');
-  if (behindBadge) behindBadge.style.display = res.behind > 0 ? '' : 'none';
+// Silent update — just fetches and updates version/commit/branch/behind badge (no modal)
+async function updateHCIInfo() {
+  try {
+    const res = await api('/api/hci/check-update');
+    if (!res.ok) return;
+    const versionEl = document.getElementById('hci-current-version');
+    if (versionEl) versionEl.textContent = res.local.version || '—';
+    const hashEl = document.getElementById('hci-current-commit');
+    if (hashEl) hashEl.textContent = res.local.hash || '—';
+    const branchEl = document.getElementById('hci-current-branch');
+    if (branchEl) branchEl.textContent = res.branch || '—';
+    const behindEl = document.getElementById('hci-commits-behind');
+    if (behindEl) behindEl.textContent = res.behind;
+    const behindBadge = document.getElementById('hci-behind-badge');
+    if (behindBadge) behindBadge.style.display = res.behind > 0 ? '' : 'none';
+    // Store for modal use
+    state._hciUpdateInfo = res;
+  } catch {}
+}
 
-  // Show commit list modal if there are updates
+// Explicit check — fetches + shows modal (used by "Check Updates" button)
+async function checkHCIUpdates() {
+  await updateHCIInfo();
+  const res = state._hciUpdateInfo;
+  if (!res || !res.ok) { showModal({ title: 'Error', message: res?.error || 'Failed to check updates', buttons: [{ text: 'OK', value: true }] }); return; }
   if (res.behind > 0) {
     showCommitListModal(res);
   } else {
@@ -3690,8 +3699,8 @@ async function loadMaintenance(container) {
     }
   } catch {}
 
-  // Auto-check HCI updates on page load
-  checkHCIUpdates();
+  // Auto-check HCI updates on page load (silent — no modal)
+  updateHCIInfo();
 }
 
 async function loadUsers() {

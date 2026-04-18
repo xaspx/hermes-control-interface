@@ -33,6 +33,17 @@
   transform: translateY(-1px);
 }
 
+.btn-outline {
+  background: transparent;
+  border-color: color-mix(in oklab, #ffac02 30%, transparent);
+  color: #ffac02;
+}
+
+.btn-outline:hover {
+  background: color-mix(in oklab, #ffac02 10%, transparent);
+  border-color: color-mix(in oklab, #ffac02 50%, transparent);
+}
+
 .btn-ghost {
   background: transparent;
   color: var(--fg-muted);
