@@ -2636,24 +2636,26 @@ app.post('/api/hci/update', requireRole('admin'), (req, res) => {
 app.get('/api/hci/check-update', requireRole('admin'), async (req, res) => {
   try {
     const HCI_DIR = __dirname;
+    // Helper: run shell command in HCI_DIR (timeout can't exec shell builtins like cd)
+    const run = (cmd, timeout) => shell(`bash -c "cd '${HCI_DIR}' && ${cmd}"`, timeout);
     // Get current branch
-    const branch = (await shell(`cd ${HCI_DIR} && git branch --show-current`, '5s')).trim();
+    const branch = (await run('git branch --show-current', '5s')).trim();
     // Fetch latest without modifying working tree
-    await shell(`cd ${HCI_DIR} && git fetch origin ${branch}`, '30s');
+    await run('git fetch origin ' + branch, '30s');
     // Get local commit
-    const localHash = (await shell(`cd ${HCI_DIR} && git rev-parse --short HEAD`, '5s')).trim();
-    const localMsg = (await shell(`cd ${HCI_DIR} && git log -1 --pretty=format:"%s"`, '5s')).trim();
-    const localDate = (await shell(`cd ${HCI_DIR} && git log -1 --format="%ci"`, '5s')).trim();
+    const localHash = (await run('git rev-parse --short HEAD', '5s')).trim();
+    const localMsg = (await run('git log -1 --pretty=format:"%s"', '5s')).trim();
+    const localDate = (await run('git log -1 --format="%ci"', '5s')).trim();
     // Get remote commit
-    const remoteHash = (await shell(`cd ${HCI_DIR} && git rev-parse --short origin/${branch}`, '5s')).trim();
+    const remoteHash = (await run(`git rev-parse --short origin/${branch}`, '5s')).trim();
     // Count commits behind
-    const behindStr = (await shell(`cd ${HCI_DIR} && git rev-list HEAD..origin/${branch} --count`, '5s')).trim();
+    const behindStr = (await run(`git rev-list HEAD..origin/${branch} --count`, '5s')).trim();
     const behind = parseInt(behindStr, 10) || 0;
     // List commits ahead on remote (newest first)
     let commits = [];
     if (behind > 0) {
-      const logRaw = await shell(
-        `cd ${HCI_DIR} && git log --oneline --format="%H|%h|%s|%an|%ci" HEAD..origin/${branch}`,
+      const logRaw = await run(
+        `git log --oneline --format="%H|%h|%s|%an|%ci" HEAD..origin/${branch}`,
         '10s'
       );
       commits = logRaw.trim().split('\n').filter(Boolean).map(line => {
@@ -2683,21 +2685,20 @@ app.get('/api/hci/commit/:hash/diff', requireRole('admin'), async (req, res) => 
   try {
     const HCI_DIR = __dirname;
     const hash = req.params.hash.replace(/[^a-f0-9]/g, ''); // sanitize
+    const run = (cmd, timeout) => shell(`bash -c "cd '${HCI_DIR}' && ${cmd}"`, timeout);
     // Get commit metadata
-    const metaRaw = await shell(
-      `cd ${HCI_DIR} && git log -1 --format="%H|%h|%s|%an|%ci|%b" ${hash}`, '5s'
-    );
+    const metaRaw = await run(`git log -1 --format="%H|%h|%s|%an|%ci|%b" ${hash}`, '5s');
     const [fullHash, shortHash, msg, author, date, body] = metaRaw.trim().split('|');
     // Get diffstat (summary only, no raw diff)
-    const stat = await shell(`cd ${HCI_DIR} && git diff --stat ${hash}~1..${hash} 2>&1`, '10s');
+    const stat = await run(`git diff --stat ${hash}~1..${hash} 2>&1`, '10s');
     // Get numstat for structured data
-    const numstat = await shell(`cd ${HCI_DIR} && git diff --numstat ${hash}~1..${hash} 2>&1`, '10s');
+    const numstat = await run(`git diff --numstat ${hash}~1..${hash} 2>&1`, '10s');
     const files = numstat.trim().split('\n').filter(Boolean).map(line => {
       const parts = line.split('\t');
       return { added: parseInt(parts[0], 10) || 0, removed: parseInt(parts[1], 10) || 0, file: parts[2] };
     });
     // Summary line from git diff --shortstat
-    const shortstat = (await shell(`cd ${HCI_DIR} && git diff --shortstat ${hash}~1..${hash}`, '5s')).trim();
+    const shortstat = (await run(`git diff --shortstat ${hash}~1..${hash}`, '5s')).trim();
 
     res.json({
       ok: true,
@@ -2715,6 +2716,7 @@ app.get('/api/hci/commit/:hash/diff', requireRole('admin'), async (req, res) => 
 app.post('/api/hci/update/commit/:hash', requireRole('admin'), (req, res) => {
   const HCI_DIR = __dirname;
   const hash = req.params.hash.replace(/[^a-f0-9]/g, ''); // sanitize
+  const run = (cmd, timeout) => shell(`bash -c "cd '${HCI_DIR}' && ${cmd}"`, timeout);
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -2726,17 +2728,17 @@ app.post('/api/hci/update/commit/:hash', requireRole('admin'), (req, res) => {
   res.write(`data: ${JSON.stringify({ type: 'progress', line: `Checking out commit ${hash}...` })}\n\n`);
 
   const steps = [
-    { name: 'fetch', cmd: `cd ${HCI_DIR} && git fetch origin`, timeout: '30s' },
-    { name: 'checkout', cmd: `cd ${HCI_DIR} && git checkout ${hash} 2>&1`, timeout: '15s' },
-    { name: 'npm install', cmd: `cd ${HCI_DIR} && npm install 2>&1`, timeout: '120s' },
-    { name: 'build', cmd: `cd ${HCI_DIR} && npm run build 2>&1`, timeout: '120s' },
+    { name: 'fetch', cmd: 'git fetch origin', timeout: '30s' },
+    { name: 'checkout', cmd: `git checkout ${hash} 2>&1`, timeout: '15s' },
+    { name: 'npm install', cmd: 'npm install 2>&1', timeout: '120s' },
+    { name: 'build', cmd: 'npm run build 2>&1', timeout: '120s' },
   ];
 
   (async () => {
     for (const step of steps) {
       res.write(`data: ${JSON.stringify({ type: 'progress', line: `▸ ${step.name}...` })}\n\n`);
       try {
-        const out = await shell(step.cmd, step.timeout || '60s');
+        const out = await run(step.cmd, step.timeout || '60s');
         const text = out.trim() || '(no output)';
         text.split('\n').filter(l => l.trim()).forEach(line => {
           res.write(`data: ${JSON.stringify({ type: 'progress', line: '  ' + line.trim() })}\n\n`);
@@ -2756,8 +2758,8 @@ app.post('/api/hci/update/commit/:hash', requireRole('admin'), (req, res) => {
       }
     }
     // Get commit info for confirmation
-    const currentHash = (await shell(`cd ${HCI_DIR} && git rev-parse --short HEAD`, '5s')).trim();
-    const currentMsg = (await shell(`cd ${HCI_DIR} && git log -1 --pretty=format:"%s"`, '5s')).trim();
+    const currentHash = (await run('git rev-parse --short HEAD', '5s')).trim();
+    const currentMsg = (await run('git log -1 --pretty=format:"%s"', '5s')).trim();
     res.write(`data: ${JSON.stringify({ type: 'progress', line: `▸ Now at ${currentHash}: ${currentMsg}` })}\n\n`);
     res.write(`data: ${JSON.stringify({ type: 'progress', line: '▸ Update complete. Restarting in 3s...' })}\n\n`);
     res.write(`data: ${JSON.stringify({ type: 'done', message: 'Update complete', hash: currentHash, msg: currentMsg })}\n\n`);
@@ -2772,7 +2774,8 @@ app.post('/api/hci/update/commit/:hash', requireRole('admin'), (req, res) => {
 // HCI Rollback — checkout previous commit (HEAD~N)
 app.post('/api/hci/rollback', requireRole('admin'), (req, res) => {
   const HCI_DIR = __dirname;
-  const steps = req.body?.steps || 1; // how many commits back, default 1
+  const numSteps = req.body?.steps || 1; // how many commits back, default 1
+  const run = (cmd, timeout) => shell(`bash -c "cd '${HCI_DIR}' && ${cmd}"`, timeout);
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -2781,19 +2784,19 @@ app.post('/api/hci/rollback', requireRole('admin'), (req, res) => {
     'X-Accel-Buffering': 'no',
   });
   res.flushHeaders();
-  res.write(`data: ${JSON.stringify({ type: 'progress', line: `Rolling back ${steps} commit(s)...` })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: 'progress', line: `Rolling back ${numSteps} commit(s)...` })}\n\n`);
 
   const rollbackSteps = [
-    { name: 'checkout', cmd: `cd ${HCI_DIR} && git checkout HEAD~${steps} 2>&1`, timeout: '15s' },
-    { name: 'npm install', cmd: `cd ${HCI_DIR} && npm install 2>&1`, timeout: '120s' },
-    { name: 'build', cmd: `cd ${HCI_DIR} && npm run build 2>&1`, timeout: '120s' },
+    { name: 'checkout', cmd: `git checkout HEAD~${numSteps} 2>&1`, timeout: '15s' },
+    { name: 'npm install', cmd: 'npm install 2>&1', timeout: '120s' },
+    { name: 'build', cmd: 'npm run build 2>&1', timeout: '120s' },
   ];
 
   (async () => {
     for (const step of rollbackSteps) {
       res.write(`data: ${JSON.stringify({ type: 'progress', line: `▸ ${step.name}...` })}\n\n`);
       try {
-        const out = await shell(step.cmd, step.timeout);
+        const out = await run(step.cmd, step.timeout);
         const text = out.trim() || '(no output)';
         text.split('\n').filter(l => l.trim()).forEach(line => {
           res.write(`data: ${JSON.stringify({ type: 'progress', line: '  ' + line.trim() })}\n\n`);
@@ -2803,7 +2806,7 @@ app.post('/api/hci/rollback', requireRole('admin'), (req, res) => {
         return res.end();
       }
     }
-    const currentHash = (await shell(`cd ${HCI_DIR} && git rev-parse --short HEAD`, '5s')).trim();
+    const currentHash = (await run('git rev-parse --short HEAD', '5s')).trim();
     res.write(`data: ${JSON.stringify({ type: 'progress', line: `▸ Rolled back to ${currentHash}` })}\n\n`);
     res.write(`data: ${JSON.stringify({ type: 'done', message: 'Rollback complete', hash: currentHash })}\n\n`);
     res.end();
