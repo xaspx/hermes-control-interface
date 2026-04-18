@@ -3,19 +3,21 @@
 A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Manage terminals, files, sessions, cron jobs, token analytics, multi-agent gateways, and team access — all behind a password gate.
 
 **Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js
-**Version:** 3.3.3
+**Version:** 3.4.0
 
 ---
 
 ## Highlights
 
-> **Chat Revamped** — Collapsible tool call cards with JSON viewer, session sidebar with model tags, banner-free output.
+> **Chat via Gateway API** — Real-time streaming, tool call cards with JSON viewer, session resume, stop button, multi-profile support. Auto-fallback to CLI.
 
 > **RBAC v2** — 28 permissions across 12 groups. Admin, viewer, or custom roles per user.
 
 > **Multi-Agent Gateway** — Start/stop/configure multiple Hermes profiles. Real-time logs. Systemd service management.
 
 > **Token Analytics** — Track sessions, messages, tokens, cost by model, platform, and time range.
+
+> **Security Hardened** — Command injection fixes, CSRF on 21 endpoints, dynamic CORS, security audit report (18 findings addressed).
 
 ---
 
@@ -513,6 +515,36 @@ If running via systemd, use `sudo systemctl restart hermes-control`.
 ---
 
 ## Changelog
+
+### v3.4.0 (2026-04-19)
+
+**⚡ Chat Revamp (CLI → Gateway API):**
+- **Gateway API chat:** Full rewrite from CLI subprocess to Gateway API (`/v1/responses`) — real-time SSE streaming, structured events, no more waiting for full response
+- **Tool call cards:** Collapsible cards with JSON viewer for tool results (collapsed by default)
+- **Session resume:** Auto via `X-Hermes-Session-Id` header — conversations persist across page reloads
+- **Stop button:** Cancel running streams mid-response
+- **Multi-profile support:** All profiles (default/soci/cuan/david) work via Gateway API with auto port discovery
+- **CLI fallback:** Automatic fallback to CLI if gateway is down
+- **Session list:** Sorted by last activity, filter by source type (Telegram/Discord/API/CLI/Cron)
+- **Mobile UX:** Auto-hide sidebar on session select, responsive header, opaque topbar
+
+**🔒 Security (CRITICAL + HIGH):**
+- **Command injection fixed:** Skills uninstall/update endpoints use `execHermes()` + strict regex `^[\w.\-]+$` validation
+- **CSRF protection:** 21 admin endpoints now require `requireCsrf` (user mgmt, config, keys, skills, HCI update/rollback/restart, backup, doctor, profiles)
+- **Gateway API key:** Dynamic from `~/.hermes/config.yaml` (removed hardcoded `'hci-gateway-2026'` from source)
+- **Dynamic CORS origins:** `cors_origins` no longer hardcoded — supports `HCI_CORS_ORIGINS` env var, auto-detect from request, or localhost defaults
+- **`escapeHtml()` fix:** Added `"` and `'` escaping to prevent XSS via HTML attributes
+- **Debug CSRF logging removed:** Partial tokens no longer logged to console
+- **18-item security audit report** (SECURITY_AUDIT.md)
+
+**🧹 Maintenance:**
+- ~270 lines dead code removed (unused functions, duplicate endpoints, redundant imports, duplicate CSS)
+- Session cache invalidation after rename and delete operations
+
+**🔌 Open-Source Ready:**
+- CORS origins: dynamic resolution for any deployment (env var → auto-detect → localhost defaults)
+- Gateway API key: reads from config.yaml, env var override supported
+- `.env.example` updated with `GATEWAY_API_KEY` and `HCI_CORS_ORIGINS` documentation
 
 ### v3.3.3 (2026-04-19)
 
