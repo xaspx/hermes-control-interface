@@ -820,6 +820,8 @@ async function sendChatMessage() {
     cursors?.forEach(c => c.remove());
     // Update session title from sidebar
     updateChatHeader();
+    // Refresh sidebar to show new sessions or update last activity
+    refreshChatSidebar();
   }
 }
 
