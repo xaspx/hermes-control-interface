@@ -3745,6 +3745,8 @@ app.delete('/api/sessions/:id', requireCsrf, async (req, res) => {
     const profile = req.body?.profile || req.query?.profile || '';
     const profileFlag = profile ? `-p ${sanitizeProfileName(profile)} ` : '';
     const output = await shell(`hermes ${profileFlag}sessions delete --yes ${sessionId} 2>&1`);
+    // Invalidate sessions cache so sidebar refresh picks up the deletion
+    hermesAllSessionsCache = { at: 0, data: [], key: '' };
     audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'SESSION_DELETE', req.params.id);
     addNotification('info', `Session deleted: ${sessionId.slice(0, 12)}…`);
     res.json({ ok: true, output });
