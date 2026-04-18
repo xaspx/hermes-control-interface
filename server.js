@@ -3386,8 +3386,10 @@ app.post('/api/skills/uninstall', requireRole('admin'), async (req, res) => {
   try {
     const { skill, profile } = req.body || {};
     if (!skill) return res.status(400).json({ ok: false, error: 'skill name required' });
+    // Sanitize skill name — only allow safe characters to prevent command injection
+    if (!/^[\w.\-]+$/.test(skill)) return res.status(400).json({ ok: false, error: 'invalid skill name' });
     const profArg = profile ? ['-p', sanitizeProfileName(profile)] : [];
-    const output = await shell(`echo y | hermes ${profile ? `-p ${sanitizeProfileName(profile)} ` : ''}skills uninstall ${skill} 2>&1`, 15000);
+    const output = await shell(`echo y | hermes ${profArg.length ? `-p ${profArg[1]} ` : ''}skills uninstall ${skill} 2>&1`, 15000);
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -3398,9 +3400,10 @@ app.post('/api/skills/uninstall', requireRole('admin'), async (req, res) => {
 app.post('/api/skills/update', requireRole('admin'), async (req, res) => {
   try {
     const { skill, profile } = req.body || {};
-    const flag = profile ? `-p ${sanitizeProfileName(profile)} ` : '';
-    const cmd = skill ? `hermes ${flag}skills update "${skill}"` : `hermes ${flag}skills update`;
-    const output = await shell(`${cmd} 2>&1`, '30s');
+    if (skill && !/^[\w.\-]+$/.test(skill)) return res.status(400).json({ ok: false, error: 'invalid skill name' });
+    const profArg = profile ? ['-p', sanitizeProfileName(profile)] : [];
+    const args = [...profArg, 'skills', 'update', ...(skill ? [skill] : [])];
+    const output = await execHermes(args, 30000);
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, error: e.message });
