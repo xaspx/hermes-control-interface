@@ -892,3 +892,189 @@
     width: 100%;
   }
 }
+
+/* ═══════════════════════════════════════════════
+   Bubble Chat Revamp — OpenWebUI / WhatsApp Style
+   ═══════════════════════════════════════════════ */
+
+/* Rounded bubbles */
+.chat-msg {
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  position: relative;
+  padding: 12px 16px;
+}
+
+/* User bubble — right side, gold tail */
+.chat-msg.msg-user {
+  border-radius: 16px 16px 4px 16px;
+  background: color-mix(in oklab, var(--gold) 10%, var(--bg-card));
+  border: none;
+  border-right: 3px solid var(--gold);
+  margin-left: auto;
+  margin-right: 4px;
+}
+
+.chat-msg.msg-user .msg-header {
+  justify-content: flex-end;
+  color: var(--gold);
+}
+
+/* Assistant bubble — left side, teal tail */
+.chat-msg.msg-assistant {
+  border-radius: 16px 16px 16px 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--teal);
+  margin-right: auto;
+  margin-left: 4px;
+}
+
+.chat-msg.msg-assistant .msg-header {
+  color: var(--teal);
+}
+
+/* Streaming state */
+.chat-msg.chat-streaming {
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(78, 205, 196, 0.2); }
+  50% { box-shadow: 0 0 12px 2px rgba(78, 205, 196, 0.15); }
+}
+
+/* ── Status Bar (bottom of chat) ─────────────── */
+.chat-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.chat-status-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-status-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+#agent-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-panel);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#agent-status-indicator.status-idle { color: var(--fg-muted); }
+#agent-status-indicator.status-running { color: var(--teal); }
+#agent-status-indicator.status-thinking { color: var(--gold); }
+#agent-status-indicator.status-tool { color: var(--purple); }
+#agent-status-indicator.status-error { color: var(--red); }
+
+#agent-status-indicator::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+/* ── Subagent Panel (sidebar) ────────────────── */
+.subagent-panel {
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.subagent-panel-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  padding: 0 4px 6px;
+}
+
+.subagent-item {
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  margin-bottom: 4px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: fadeIn 0.3s ease;
+}
+
+.subagent-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.subagent-status.running { background: var(--teal); animation: blink 1s infinite; }
+.subagent-status.completed { background: var(--green); }
+.subagent-status.failed { background: var(--red); }
+
+.subagent-model {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+}
+
+/* ── Responsive Improvements ─────────────────── */
+@media (max-width: 768px) {
+  .chat-msg {
+    max-width: 92%;
+    padding: 10px 14px;
+  }
+
+  .chat-status-bar {
+    padding: 6px 12px;
+    font-size: 10px;
+  }
+
+  .chat-status-right {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-msg {
+    max-width: 96%;
+    border-radius: 14px;
+  }
+
+  .chat-msg.msg-user {
+    border-radius: 14px 14px 4px 14px;
+  }
+
+  .chat-msg.msg-assistant {
+    border-radius: 14px 14px 14px 4px;
+  }
+}
