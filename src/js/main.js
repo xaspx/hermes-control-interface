@@ -279,6 +279,9 @@ async function loadChat(container) {
         <div class="chat-sidebar-list" id="chat-sidebar-list">
           <div class="loading">Loading sessions...</div>
         </div>
+        <div id="subagent-panel" class="subagent-panel" style="display:none;">
+          <div class="subagent-panel-title">Subagents</div>
+        </div>
       </div>
       <div class="chat-sidebar-backdrop" id="chat-sidebar-backdrop" onclick="toggleChatSidebar()"></div>
       <div class="chat-main">
@@ -300,9 +303,14 @@ async function loadChat(container) {
         </div>
         <div class="chat-messages" id="chat-messages"></div>
         <div class="chat-status-bar" id="chat-status-bar">
-          <span id="chat-status-session">—</span>
-          <span id="chat-status-tokens"></span>
-          <span id="chat-status-elapsed"></span>
+          <div class="chat-status-left">
+            <span id="agent-status-indicator" class="status-idle">ready</span>
+            <span id="chat-status-session" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</span>
+          </div>
+          <div class="chat-status-right">
+            <span id="chat-status-tokens"></span>
+            <span id="chat-status-elapsed"></span>
+          </div>
         </div>
         <div class="chat-input-area">
           <textarea id="chat-input" placeholder="Type a message... (Enter to send)" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
@@ -1113,9 +1121,9 @@ function handleToolDone(toolId, name, summary, error, inlineDiff) {
 }
 
 function handleSubagentEvent(type, payload) {
-  // Update subagent panel in sidebar
+  // Show panel if hidden
   const panel = document.getElementById('subagent-panel');
-  if (!panel) return;
+  if (panel) panel.style.display = '';
   
   const id = payload.subagent_id;
   let el = document.getElementById(`subagent-${id}`);
@@ -1141,6 +1149,11 @@ function handleSubagentEvent(type, payload) {
       // Auto-remove after 5 seconds
       setTimeout(() => el?.remove(), 5000);
     }
+  }
+  
+  // Hide panel if empty
+  if (panel && panel.children.length <= 1) {
+    panel.style.display = 'none';
   }
 }
 
