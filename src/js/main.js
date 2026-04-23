@@ -930,84 +930,292 @@ function handleGatewayEvent(evt, contentDiv, messagesDiv, toolCards) {
   }
 }
 
-// ── WebSocket Chat (real-time events) ──
+// ── WebSocket Chat (TUI events) ──
 function setupWsChatHandlers() {
   wsClient.addEventListener('message', (ev) => {
     const msg = ev.detail;
-    if (msg.type === 'chat.event') {
-      handleWsChatEvent(msg.event);
-    } else if (msg.type === 'chat.session') {
-      state._currentChatSession = msg.session_id;
-      updateChatHeader();
-    } else if (msg.type === 'chat.done') {
-      finalizeWsChat();
-    } else if (msg.type === 'chat.error') {
-      showChatError(msg.error);
+    switch (msg.type) {
+      case 'chat.thinking':
+        handleThinkingDelta(msg.delta);
+        break;
+      case 'chat.reasoning':
+        handleReasoningDelta(msg.delta);
+        break;
+      case 'chat.start':
+        handleMessageStart();
+        break;
+      case 'chat.text':
+        handleTextDelta(msg.delta);
+        break;
+      case 'chat.status':
+        handleStatusUpdate(msg.status, msg.kind);
+        break;
+      case 'chat.tool.generating':
+        handleToolGenerating(msg.name);
+        break;
+      case 'chat.tool.start':
+        handleToolStart(msg.tool_id, msg.name, msg.context);
+        break;
+      case 'chat.tool.progress':
+        handleToolProgress(msg.name, msg.preview);
+        break;
+      case 'chat.tool.done':
+        handleToolDone(msg.tool_id, msg.name, msg.summary, msg.error, msg.inline_diff);
+        break;
+      case 'chat.session':
+        state._currentChatSession = msg.session_id;
+        state._sessionInfo = msg.info;
+        updateChatHeader();
+        break;
+      case 'chat.done':
+        finalizeWsChat();
+        break;
+      case 'chat.error':
+        showChatError(msg.error);
+        break;
+      case 'chat.clarify':
+        showClarifyModal(msg.question, msg.choices, msg.request_id);
+        break;
+      case 'chat.approval':
+        showApprovalModal(msg.command, msg.description);
+        break;
+      case 'chat.sudo':
+        showSudoModal(msg.request_id);
+        break;
+      case 'chat.secret':
+        showSecretModal(msg.env_var, msg.prompt, msg.request_id);
+        break;
+      case 'chat.subagent.start':
+      case 'chat.subagent.progress':
+      case 'chat.subagent.complete':
+        handleSubagentEvent(msg.type, msg.payload);
+        break;
+      case 'tui.ready':
+        console.log('[TUI] Gateway ready');
+        break;
+      case 'tui.stderr':
+        console.log('[TUI] stderr:', msg.line);
+        break;
+      case 'tui.error':
+        console.error('[TUI] error:', msg.error);
+        break;
     }
   });
 }
 
-function handleWsChatEvent(evt) {
+function handleThinkingDelta(delta) {
   const messagesDiv = document.getElementById('chat-messages');
-  const contentDiv = document.getElementById('gw-stream-text')?.parentElement;
   if (!messagesDiv) return;
+  const panel = ensureThinkingPanel(messagesDiv);
+  const textEl = panel.querySelector('.thinking-text');
+  if (textEl) {
+    textEl.textContent += delta;
+    panel.scrollTop = panel.scrollHeight;
+  }
+}
 
-  switch (evt.type) {
-    case 'thinking.delta': {
-      const panel = ensureThinkingPanel(messagesDiv);
-      const textEl = panel.querySelector('.thinking-text');
-      if (textEl) {
-        textEl.textContent += evt.delta;
-        panel.scrollTop = panel.scrollHeight;
-      }
-      break;
-    }
-    case 'text.delta': {
-      hideThinkingPanel();
-      const streamEl = document.getElementById('chat-streaming');
-      if (streamEl) {
-        const body = streamEl.querySelector('.msg-body');
-        if (body) {
-          let span = body.querySelector('#gw-stream-text');
-          if (!span) { span = document.createElement('span'); span.id = 'gw-stream-text'; body.appendChild(span); }
-          span.textContent += evt.delta;
-          messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-      }
-      break;
-    }
-    case 'tool.start': {
-      hideThinkingPanel();
-      const tc = ensureToolCards();
-      // Find the stream element's msg-body to inject tool card
-      const streamEl = document.getElementById('chat-streaming');
-      const targetDiv = streamEl?.querySelector('.msg-body') || contentDiv;
-      const card = addToolCallCard(targetDiv, evt.call_id, evt.name, evt.arguments);
-      tc.set(evt.call_id, card);
+function handleReasoningDelta(delta) {
+  // Same as thinking for now
+  handleThinkingDelta(delta);
+}
+
+function handleMessageStart() {
+  hideThinkingPanel();
+  const messagesDiv = document.getElementById('chat-messages');
+  if (!messagesDiv) return;
+  let streamEl = document.getElementById('chat-streaming');
+  if (!streamEl) {
+    streamEl = document.createElement('div');
+    streamEl.id = 'chat-streaming';
+    streamEl.className = 'chat-msg msg-assistant chat-streaming';
+    streamEl.innerHTML = '<div class="msg-header"><span class="msg-header-label">🤖 Assistant</span></div><div class="msg-body"><span id="gw-stream-text"></span><span class="chat-cursor" style="animation:blink 1s infinite;">▊</span></div>';
+    messagesDiv.appendChild(streamEl);
+  }
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function handleTextDelta(delta) {
+  const messagesDiv = document.getElementById('chat-messages');
+  if (!messagesDiv) return;
+  const streamEl = document.getElementById('chat-streaming');
+  if (streamEl) {
+    const body = streamEl.querySelector('.msg-body');
+    if (body) {
+      let span = body.querySelector('#gw-stream-text');
+      if (!span) { span = document.createElement('span'); span.id = 'gw-stream-text'; body.insertBefore(span, body.querySelector('.chat-cursor')); }
+      span.textContent += delta;
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
-      break;
-    }
-    case 'tool.progress': {
-      const tc = ensureToolCards();
-      updateToolProgress(tc, evt.name, evt.preview);
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
-      break;
-    }
-    case 'tool.done': {
-      const tc = ensureToolCards();
-      finalizeToolCard(tc, evt.call_id, evt.result);
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
-      break;
-    }
-    case 'status': {
-      const statusEl = document.getElementById('chat-status-bar');
-      if (statusEl) {
-        const sessionSpan = statusEl.querySelector('#chat-status-session');
-        if (sessionSpan) sessionSpan.textContent = evt.status || '';
-      }
-      break;
     }
   }
+}
+
+function handleStatusUpdate(status, kind) {
+  const statusEl = document.getElementById('chat-status-bar');
+  if (statusEl) {
+    const sessionSpan = statusEl.querySelector('#chat-status-session');
+    if (sessionSpan) sessionSpan.textContent = status || '';
+  }
+  // Also update a global status indicator
+  const indicator = document.getElementById('agent-status-indicator');
+  if (indicator) {
+    indicator.textContent = status || 'ready';
+    indicator.className = `status-${kind || 'idle'}`;
+  }
+}
+
+function handleToolGenerating(name) {
+  // Tool schema being generated — show subtle indicator
+  console.log('[Tool] Generating:', name);
+}
+
+function handleToolStart(toolId, name, context) {
+  hideThinkingPanel();
+  const tc = ensureToolCards();
+  const messagesDiv = document.getElementById('chat-messages');
+  const streamEl = document.getElementById('chat-streaming');
+  const targetDiv = streamEl?.querySelector('.msg-body');
+  if (targetDiv) {
+    const card = addToolCallCard(targetDiv, toolId, name, context);
+    tc.set(toolId, card);
+  }
+  if (messagesDiv) messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function handleToolProgress(name, preview) {
+  const tc = ensureToolCards();
+  for (const [id, el] of tc) {
+    const previewEl = el.querySelector('.tool-card-preview');
+    if (previewEl && preview) previewEl.textContent = preview;
+  }
+}
+
+function handleToolDone(toolId, name, summary, error, inlineDiff) {
+  const tc = ensureToolCards();
+  const card = tc.get(toolId);
+  if (card) {
+    const statusEl = card.querySelector('.tool-card-status');
+    if (statusEl) {
+      statusEl.textContent = error ? 'error' : 'done';
+      statusEl.className = `tool-card-status ${error ? 'error' : 'done'}`;
+    }
+    const resultEl = card.querySelector('.tool-card-result');
+    if (resultEl) {
+      if (error) {
+        resultEl.innerHTML = `<span style="color:var(--red)">❌ ${escapeHtml(error)}</span>`;
+      } else if (inlineDiff) {
+        resultEl.innerHTML = `<pre>${escapeHtml(inlineDiff)}</pre>`;
+      } else if (summary) {
+        resultEl.textContent = summary;
+      }
+    }
+    tc.delete(toolId);
+  }
+}
+
+function handleSubagentEvent(type, payload) {
+  // Update subagent panel in sidebar
+  const panel = document.getElementById('subagent-panel');
+  if (!panel) return;
+  
+  const id = payload.subagent_id;
+  let el = document.getElementById(`subagent-${id}`);
+  
+  if (type === 'chat.subagent.start') {
+    if (!el) {
+      el = document.createElement('div');
+      el.id = `subagent-${id}`;
+      el.className = 'subagent-item';
+      panel.appendChild(el);
+    }
+    el.innerHTML = `<span class="subagent-status running">●</span> ${escapeHtml(payload.goal?.slice(0, 40) || 'Subagent')} <span class="subagent-model">${escapeHtml(payload.model || '')}</span>`;
+  } else if (type === 'chat.subagent.progress') {
+    if (el) {
+      const progress = payload.iteration ? ` (${payload.iteration}/${payload.tool_count || '?'})` : '';
+      el.innerHTML = `<span class="subagent-status running">●</span> ${escapeHtml(payload.goal?.slice(0, 40) || 'Subagent')}${progress}`;
+    }
+  } else if (type === 'chat.subagent.complete') {
+    if (el) {
+      const status = payload.status === 'completed' ? 'completed' : 'failed';
+      const icon = payload.status === 'completed' ? '✅' : '❌';
+      el.innerHTML = `${icon} ${escapeHtml(payload.goal?.slice(0, 40) || 'Subagent')} <span class="subagent-status ${status}">${payload.status}</span>`;
+      // Auto-remove after 5 seconds
+      setTimeout(() => el?.remove(), 5000);
+    }
+  }
+}
+
+// ── Interactive Modals ─────────────────────────────────────────────
+
+function showClarifyModal(question, choices, requestId) {
+  if (!choices || choices.length === 0) {
+    // Open-ended: text input
+    showModal({
+      title: 'Clarification Needed',
+      body: `<p>${escapeHtml(question)}</p><input type="text" id="clarify-input" class="modal-input" placeholder="Your answer..." style="width:100%;margin-top:12px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--fg);">`,
+      confirmText: 'Submit',
+      onConfirm: () => {
+        const input = document.getElementById('clarify-input');
+        if (input) wsClient.clarifyRespond(requestId, input.value);
+      }
+    });
+  } else {
+    // Multiple choice
+    const buttons = choices.map(c => 
+      `<button class="modal-choice-btn" data-choice="${escapeHtml(c)}" style="display:block;width:100%;margin:4px 0;padding:10px;text-align:left;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--fg);cursor:pointer;">${escapeHtml(c)}</button>`
+    ).join('');
+    showModal({
+      title: 'Clarification Needed',
+      body: `<p>${escapeHtml(question)}</p><div style="margin-top:12px;">${buttons}</div>`,
+      showCancel: false,
+      confirmText: null,
+      onRender: () => {
+        document.querySelectorAll('.modal-choice-btn').forEach(btn => {
+          btn.onclick = () => {
+            wsClient.clarifyRespond(requestId, null, btn.dataset.choice);
+            closeModal();
+          };
+        });
+      }
+    });
+  }
+}
+
+function showApprovalModal(command, description) {
+  showModal({
+    title: 'Approval Required',
+    body: `
+      <p>${escapeHtml(description || 'The agent wants to run a command:')}</p>
+      <pre style="margin-top:12px;padding:12px;background:var(--bg-dark);border-radius:8px;overflow-x:auto;"><code>${escapeHtml(command)}</code></pre>
+    `,
+    confirmText: '✅ Approve',
+    cancelText: '❌ Deny',
+    onConfirm: () => wsClient.approvalRespond(true, command),
+    onCancel: () => wsClient.approvalRespond(false, command),
+  });
+}
+
+function showSudoModal(requestId) {
+  showModal({
+    title: 'Sudo Password Required',
+    body: `<p>The agent needs sudo privileges. Enter your password:</p><input type="password" id="sudo-input" class="modal-input" placeholder="Password" style="width:100%;margin-top:12px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--fg);">`,
+    confirmText: 'Submit',
+    onConfirm: () => {
+      const input = document.getElementById('sudo-input');
+      if (input) wsClient.sudoRespond(requestId, input.value);
+    }
+  });
+}
+
+function showSecretModal(envVar, prompt, requestId) {
+  showModal({
+    title: `Secret Required: ${escapeHtml(envVar)}`,
+    body: `<p>${escapeHtml(prompt || `Enter value for ${envVar}:`)}</p><input type="password" id="secret-input" class="modal-input" placeholder="Value" style="width:100%;margin-top:12px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--fg);">`,
+    confirmText: 'Submit',
+    onConfirm: () => {
+      const input = document.getElementById('secret-input');
+      if (input) wsClient.secretRespond(requestId, input.value);
+    }
+  });
 }
 
 function ensureThinkingPanel(messagesDiv) {

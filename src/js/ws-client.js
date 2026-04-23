@@ -106,6 +106,22 @@ class HciWsClient extends EventTarget {
     return this.send({ type: 'chat.stop' });
   }
 
+  clarifyRespond(request_id, text, choice) {
+    return this.send({ type: 'clarify.respond', request_id, text, choice });
+  }
+
+  approvalRespond(approve, command) {
+    return this.send({ type: 'approval.respond', approve, command });
+  }
+
+  sudoRespond(request_id, password) {
+    return this.send({ type: 'sudo.respond', request_id, password });
+  }
+
+  secretRespond(request_id, value) {
+    return this.send({ type: 'secret.respond', request_id, value });
+  }
+
   disconnect() {
     this.stopPing();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
