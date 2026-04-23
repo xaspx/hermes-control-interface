@@ -309,25 +309,27 @@ function resolveCorsOrigins(req) {
 // Scans ~/.hermes/config.yaml (default) + ~/.hermes/profiles/*/config.yaml
 function discoverGatewayPorts() {
   const ports = {};
+  const baseHermesHome = path.join(os.homedir(), '.hermes');
   try {
-    // Default profile: ~/.hermes/config.yaml
-    const defaultConf = fs.readFileSync(path.join(HERMES_HOME, 'config.yaml'), 'utf8');
+    // Default profile: ~/.hermes/config.yaml (base, not HERMES_HOME which may be profile-specific)
+    const defaultConf = fs.readFileSync(path.join(baseHermesHome, 'config.yaml'), 'utf8');
     const defaultCfg = yaml.load(defaultConf);
-    const ds = defaultCfg.platforms?.api_server;
+    // Check both platforms.api_server (injected) and top-level api_server (legacy)
+    const ds = defaultCfg.platforms?.api_server || defaultCfg.api_server;
     if (ds?.enabled && ds?.extra?.port) {
       ports['default'] = ds.extra.port;
     }
   } catch (_) { /* no default config */ }
 
   // Other profiles: ~/.hermes/profiles/<name>/config.yaml
-  const profilesDir = path.join(HERMES_HOME, 'profiles');
+  const profilesDir = path.join(baseHermesHome, 'profiles');
   try {
     for (const name of fs.readdirSync(profilesDir)) {
       try {
         const confPath = path.join(profilesDir, name, 'config.yaml');
         const raw = fs.readFileSync(confPath, 'utf8');
         const cfg = yaml.load(raw);
-        const apiSrv = cfg.platforms?.api_server;
+        const apiSrv = cfg.platforms?.api_server || cfg.api_server;
         if (apiSrv?.enabled && apiSrv?.extra?.port) {
           ports[name] = apiSrv.extra.port;
         }
@@ -356,6 +358,21 @@ function getGatewayBase(profile) {
   return `http://127.0.0.1:${port}`;
 }
 
+// Read default model from profile config.yaml
+function getDefaultModel(profile) {
+  const baseHermesHome = path.join(os.homedir(), '.hermes');
+  try {
+    const configPath = profile === 'default'
+      ? path.join(baseHermesHome, 'config.yaml')
+      : path.join(baseHermesHome, 'profiles', profile, 'config.yaml');
+    if (fs.existsSync(configPath)) {
+      const cfg = yaml.load(fs.readFileSync(configPath, 'utf8'));
+      return cfg?.model?.default || cfg?.model || 'moonshotai/kimi-k2.6';
+    }
+  } catch (_) { /* fallback */ }
+  return 'moonshotai/kimi-k2.6';
+}
+
 // GET /api/gateway/ports — discovered gateway API ports per profile
 app.get('/api/gateway/ports', requireAuth, (req, res) => {
   res.json({ ports: gatewayPorts, profiles: Object.keys(gatewayPorts) });
@@ -376,7 +393,7 @@ app.post('/api/gateway/responses', requireAuth, requirePerm('chat.use'), async (
     }
     console.log(`[GatewayChat] Routing to ${gatewayBase}/v1/responses`);
     const gatewayBody = {
-      model: model || 'glm-5.1',
+      model: model || getDefaultModel(profile || 'default'),
       input: message,
       stream,
     };
@@ -4376,6 +4393,130 @@ const server = (() => {
   return server;
 })();
 
+// ── WebSocket Chat Gateway Bridge ──
+// Proxies Gateway API /v1/responses via WebSocket for real-time event streaming.
+async function handleWsChatStart(socket, msg) {
+  const { message, profile, session_id, model } = msg;
+  if (!message || typeof message !== 'string') {
+    socket.send(JSON.stringify({ type: 'chat.error', error: 'message required' }));
+    return;
+  }
+
+  const gatewayBase = getGatewayBase(profile || 'default');
+  if (!gatewayBase) {
+    socket.send(JSON.stringify({ type: 'chat.error', error: 'Gateway API not available for profile: ' + (profile || 'default') }));
+    return;
+  }
+
+  const gatewayBody = { model: model || getDefaultModel(profile || 'default'), input: message, stream: true };
+  const gwHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATEWAY_API_KEY}` };
+  if (session_id) gwHeaders['X-Hermes-Session-Id'] = session_id;
+
+  try {
+    const gatewayRes = await fetch(`${gatewayBase}/v1/responses`, {
+      method: 'POST', headers: gwHeaders, body: JSON.stringify(gatewayBody),
+    });
+
+    if (!gatewayRes.ok) {
+      const errText = await gatewayRes.text();
+      socket.send(JSON.stringify({ type: 'chat.error', error: `Gateway ${gatewayRes.status}: ${errText}` }));
+      return;
+    }
+
+    const hermesSessionId = gatewayRes.headers.get('x-hermes-session-id') || '';
+    if (hermesSessionId) {
+      socket.send(JSON.stringify({ type: 'chat.session', session_id: hermesSessionId }));
+    }
+
+    const reader = gatewayRes.body.getReader();
+    socket.activeChatReader = reader;
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (socket.readyState !== 1) break; // socket closed
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const lines = part.split('\n');
+          let dataLine = '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) dataLine = line.slice(6);
+          }
+          if (!dataLine) continue;
+          try {
+            const evt = JSON.parse(dataLine);
+            // Transform SSE events to WS chat events
+            const wsEvent = transformGatewayEvent(evt);
+            if (wsEvent) {
+              socket.send(JSON.stringify({ type: 'chat.event', event: wsEvent }));
+            }
+          } catch {}
+        }
+      }
+    } catch (pipeErr) {
+      console.error('[WS Chat] pipe error:', pipeErr.message);
+    } finally {
+      socket.activeChatReader = null;
+      if (socket.readyState === 1) {
+        socket.send(JSON.stringify({ type: 'chat.done' }));
+      }
+    }
+  } catch (e) {
+    console.error('[WS Chat] error:', e.message);
+    socket.send(JSON.stringify({ type: 'chat.error', error: e.message }));
+    socket.activeChatReader = null;
+  }
+}
+
+function transformGatewayEvent(evt) {
+  const t = evt.type;
+  // Text streaming
+  if (t === 'response.output_text.delta') {
+    return { type: 'text.delta', delta: evt.delta || '' };
+  }
+  // Tool call started
+  if (t === 'response.output_item.added') {
+    const item = evt.item || {};
+    if (item.type === 'function_call' || item.type === 'tool_call') {
+      return { type: 'tool.start', call_id: item.call_id || item.id || ('tc_' + Date.now()), name: item.name, arguments: item.arguments || item.args };
+    }
+  }
+  // Tool progress
+  if (t === 'hermes.tool.progress') {
+    return { type: 'tool.progress', name: evt.name, preview: evt.preview };
+  }
+  // Tool call done
+  if (t === 'response.output_item.done') {
+    const item = evt.item || {};
+    if (item.type === 'function_call' || item.type === 'tool_call') {
+      return { type: 'tool.done', call_id: item.call_id || item.id, result: item.result || item.output || '' };
+    }
+  }
+  // Response completed
+  if (t === 'response.completed') {
+    return { type: 'response.completed', response_id: evt.response?.id };
+  }
+  // Session info (injected by HCI)
+  if (t === 'hci.session') {
+    return { type: 'session', session_id: evt.session_id };
+  }
+  // Reasoning / thinking
+  if (t === 'response.reasoning.delta' || t === 'response.thinking.delta') {
+    return { type: 'thinking.delta', delta: evt.delta || evt.text || '' };
+  }
+  // Status update
+  if (t === 'status.update') {
+    return { type: 'status', status: evt.status, kind: evt.kind };
+  }
+  return null;
+}
+
 const wss = new WebSocketServer({
   server,
   path: '/ws',
@@ -4407,8 +4548,9 @@ async function broadcast() {
 
 wss.on('connection', async (socket, req) => {
   socket.authed = isAuthed(req);
+  socket.clientId = 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  socket.activeChatReader = null; // for cancelling gateway streams
   if (!socket.authed) {
-    // Don't send dashboard data to unauthenticated connections
     socket.send(JSON.stringify({ type: 'auth-required', message: 'authentication required' }));
     return;
   }
@@ -4432,8 +4574,6 @@ wss.on('connection', async (socket, req) => {
       if (msg.type === 'terminal-input' && socket.authed) {
         let data = String(msg.data || '');
         if (data.length > 4096) return;
-        // Strip CPR responses (cursor position report) that leak through xterm
-        // Pattern: ESC[<n>;<m>R or residual ;1R sequences
         data = data.replace(/\x1b\[[0-9;]*R/g, '').replace(/;[0-9]+R/g, '');
         if (!data) return;
         const command = data.replace(/[\r\n]+$/g, '');
@@ -4462,7 +4602,23 @@ wss.on('connection', async (socket, req) => {
       if (msg.type === 'log-stop' && socket.authed) {
         stopLogStream();
       }
+      // ── Chat via WebSocket ──
+      if (msg.type === 'chat.start' && socket.authed) {
+        handleWsChatStart(socket, msg);
+      }
+      if (msg.type === 'chat.stop' && socket.authed) {
+        if (socket.activeChatReader) {
+          socket.activeChatReader.cancel().catch(() => {});
+          socket.activeChatReader = null;
+        }
+      }
     } catch {}
+  });
+  socket.on('close', () => {
+    if (socket.activeChatReader) {
+      socket.activeChatReader.cancel().catch(() => {});
+      socket.activeChatReader = null;
+    }
   });
 });
 

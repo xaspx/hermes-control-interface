@@ -4,6 +4,7 @@
 import { Chart, registerables } from 'chart.js';
 import { toDisplayText } from './chat-render-utils.mjs';
 import { resolveSessionDisplayTitle } from './session-title-utils.mjs';
+import { wsClient } from './ws-client.js';
 Chart.register(...registerables);
 
 // State
@@ -90,6 +91,9 @@ function showApp() {
   updateUserMenu();
   navigate(state.page);
   startNotifPolling();
+  // Connect WebSocket for real-time events
+  wsClient.connect();
+  setupWsChatHandlers();
 }
 
 function updateUserMenu() {
@@ -467,7 +471,7 @@ async function reloadCurrentSessionMessages() {
 
   try {
     const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
-    if (!r.ok) return;
+    if (!r.ok) { console.warn('[Chat] reload messages failed:', r.status); return; }
     const data = await r.json();
 
     // Token info
@@ -486,7 +490,7 @@ async function reloadCurrentSessionMessages() {
       modelBadge.style.display = 'none';
     }
 
-    if (!data.messages || data.messages.length === 0) return;
+    if (!data.messages || data.messages.length === 0) { console.warn('[Chat] no messages in session'); return; }
 
     // Rebuild messages cleanly
     container.innerHTML = '';
@@ -495,7 +499,7 @@ async function reloadCurrentSessionMessages() {
     }
     highlightCodeBlocks(container);
     container.scrollTop = container.scrollHeight;
-  } catch {}
+  } catch (e) { console.error('[Chat] reload messages error:', e); }
 }
 
 async function loadChatSession(sessionId) {
@@ -687,11 +691,15 @@ function toggleChatSidebar() {
   }
 }
 
-// Stop active chat stream (Gateway API or CLI)
+// Stop active chat stream (Gateway API or CLI or WS)
 function stopChatStream() {
   if (state._currentStreamReader) {
     state._currentStreamReader.cancel().catch(() => {});
     state._currentStreamReader = null;
+  }
+  // Also send WS stop if connected
+  if (wsClient.connected) {
+    wsClient.chatStop();
   }
   state._chatLock = false;
   const sendBtn = document.getElementById('chat-send-btn');
@@ -779,15 +787,20 @@ async function sendChatMessage() {
   if (btn) { btn.disabled = true; btn.style.display = 'none'; }
   if (stopBtn) stopBtn.style.display = 'inline-flex';
   try {
-    // All profiles use Gateway API (default, soci, cuan, david)
-    await sendViaGatewayAPI(text, profile, sessionId, contentDiv, messagesDiv, startTime);
-  } catch (gwErr) {
-    console.warn('[Chat] Gateway API failed, falling back to CLI:', gwErr.message);
-    try {
-      await sendViaCLI(text, profile, sessionId, contentDiv, messagesDiv, startTime);
-    } catch (cliErr) {
-      if (contentDiv) contentDiv.innerHTML = renderChatContent(fullContent) + '<div style="color:var(--red);margin-top:8px;">Error: ' + escapeHtml(cliErr.message) + '</div>';
+    // Prefer WebSocket for real-time events (thinking, tool progress, streaming)
+    if (wsClient.connected) {
+      try {
+        await sendViaWebSocket(text, profile, sessionId);
+        return; // WS success — done
+      } catch (wsErr) {
+        console.warn('[Chat] WS failed, falling back to CLI:', wsErr.message);
+      }
     }
+    // Fallback to CLI (Gateway API chat endpoint not available in Hermes)
+    await sendViaCLI(text, profile, sessionId, contentDiv, messagesDiv, startTime);
+  } catch (cliErr) {
+    console.error('[Chat] CLI failed:', cliErr.message);
+    if (contentDiv) contentDiv.innerHTML = renderChatContent(fullContent) + '<div style="color:var(--red);margin-top:8px;">Error: ' + escapeHtml(cliErr.message) + '</div>';
   } finally {
     state._chatLock = false;
     state._currentStreamReader = null;
@@ -915,6 +928,207 @@ function handleGatewayEvent(evt, contentDiv, messagesDiv, toolCards) {
       if (!state._currentChatSession) state._currentChatSession = evt.response.id;
     }
   }
+}
+
+// ── WebSocket Chat (real-time events) ──
+function setupWsChatHandlers() {
+  wsClient.addEventListener('message', (ev) => {
+    const msg = ev.detail;
+    if (msg.type === 'chat.event') {
+      handleWsChatEvent(msg.event);
+    } else if (msg.type === 'chat.session') {
+      state._currentChatSession = msg.session_id;
+      updateChatHeader();
+    } else if (msg.type === 'chat.done') {
+      finalizeWsChat();
+    } else if (msg.type === 'chat.error') {
+      showChatError(msg.error);
+    }
+  });
+}
+
+function handleWsChatEvent(evt) {
+  const messagesDiv = document.getElementById('chat-messages');
+  const contentDiv = document.getElementById('gw-stream-text')?.parentElement;
+  if (!messagesDiv) return;
+
+  switch (evt.type) {
+    case 'thinking.delta': {
+      const panel = ensureThinkingPanel(messagesDiv);
+      const textEl = panel.querySelector('.thinking-text');
+      if (textEl) {
+        textEl.textContent += evt.delta;
+        panel.scrollTop = panel.scrollHeight;
+      }
+      break;
+    }
+    case 'text.delta': {
+      hideThinkingPanel();
+      const streamEl = document.getElementById('chat-streaming');
+      if (streamEl) {
+        const body = streamEl.querySelector('.msg-body');
+        if (body) {
+          let span = body.querySelector('#gw-stream-text');
+          if (!span) { span = document.createElement('span'); span.id = 'gw-stream-text'; body.appendChild(span); }
+          span.textContent += evt.delta;
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+      }
+      break;
+    }
+    case 'tool.start': {
+      hideThinkingPanel();
+      const tc = ensureToolCards();
+      // Find the stream element's msg-body to inject tool card
+      const streamEl = document.getElementById('chat-streaming');
+      const targetDiv = streamEl?.querySelector('.msg-body') || contentDiv;
+      const card = addToolCallCard(targetDiv, evt.call_id, evt.name, evt.arguments);
+      tc.set(evt.call_id, card);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      break;
+    }
+    case 'tool.progress': {
+      const tc = ensureToolCards();
+      updateToolProgress(tc, evt.name, evt.preview);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      break;
+    }
+    case 'tool.done': {
+      const tc = ensureToolCards();
+      finalizeToolCard(tc, evt.call_id, evt.result);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      break;
+    }
+    case 'status': {
+      const statusEl = document.getElementById('chat-status-bar');
+      if (statusEl) {
+        const sessionSpan = statusEl.querySelector('#chat-status-session');
+        if (sessionSpan) sessionSpan.textContent = evt.status || '';
+      }
+      break;
+    }
+  }
+}
+
+function ensureThinkingPanel(messagesDiv) {
+  let panel = document.getElementById('chat-thinking-panel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'chat-thinking-panel';
+    panel.className = 'chat-thinking-panel';
+    panel.innerHTML = '<div class="thinking-header">💭 Thinking</div><div class="thinking-text"></div>';
+    // Insert before the streaming message or at the end
+    const streamEl = document.getElementById('chat-streaming');
+    if (streamEl && streamEl.parentElement === messagesDiv) {
+      messagesDiv.insertBefore(panel, streamEl);
+    } else {
+      messagesDiv.appendChild(panel);
+    }
+  }
+  return panel;
+}
+
+function hideThinkingPanel() {
+  const panel = document.getElementById('chat-thinking-panel');
+  if (panel) panel.style.display = 'none';
+}
+
+function ensureToolCards() {
+  if (!state._wsToolCards) state._wsToolCards = new Map();
+  return state._wsToolCards;
+}
+
+function finalizeWsChat() {
+  state._wsToolCards = null;
+  const elapsed = ((Date.now() - (state._chatStartTime || 0)) / 1000).toFixed(1);
+  const elapsedEl = document.getElementById('chat-status-elapsed');
+  if (elapsedEl) elapsedEl.textContent = elapsed + 's';
+  const stopBtn = document.getElementById('chat-stop-btn');
+  if (stopBtn) stopBtn.style.display = 'none';
+  const sendBtn = document.getElementById('chat-send-btn');
+  if (sendBtn) { sendBtn.style.display = ''; sendBtn.disabled = false; sendBtn.textContent = 'Send'; }
+
+  // Always remove the streaming element
+  const streamEl = document.getElementById('chat-streaming');
+  if (streamEl) {
+    // If we have a session, reload from DB for clean render
+    if (state._currentChatSession) {
+      reloadCurrentSessionMessages().catch(console.error);
+    } else {
+      // No session yet — convert streaming element to a static message
+      streamEl.removeAttribute('id');
+      streamEl.classList.remove('chat-streaming');
+      const cursor = streamEl.querySelector('.chat-cursor');
+      if (cursor) cursor.remove();
+    }
+  }
+  refreshChatSidebar();
+  updateChatHeader();
+  state._chatLock = false;
+}
+
+function showChatError(error) {
+  const messagesDiv = document.getElementById('chat-messages');
+  if (messagesDiv) {
+    messagesDiv.innerHTML += `<div class="chat-msg msg-system"><div class="msg-body" style="color:var(--error)">❌ ${escapeHtml(error)}</div></div>`;
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+  const stopBtn = document.getElementById('chat-stop-btn');
+  if (stopBtn) stopBtn.style.display = 'none';
+  const sendBtn = document.getElementById('chat-send-btn');
+  if (sendBtn) sendBtn.style.display = '';
+}
+
+// ── Send via WebSocket ──
+async function sendViaWebSocket(text, profile, sessionId) {
+  return new Promise((resolve, reject) => {
+    const messagesDiv = document.getElementById('chat-messages');
+    if (!messagesDiv) { reject(new Error('No chat container')); return; }
+
+    // User message ALREADY added by sendChatMessage() — don't add again
+    state._chatStartTime = Date.now();
+    state._wsToolCards = new Map();
+
+    // Use the streaming element created by sendChatMessage()
+    let streamEl = document.getElementById('chat-streaming');
+    if (!streamEl) {
+      // Fallback: create if missing
+      streamEl = document.createElement('div');
+      streamEl.id = 'chat-streaming';
+      streamEl.className = 'chat-msg msg-assistant';
+      streamEl.innerHTML = '<div class="msg-header"><span class="msg-header-label">🤖 Assistant</span></div><div class="msg-body"><span id="gw-stream-text"></span></div>';
+      messagesDiv.appendChild(streamEl);
+    }
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+    // Show stop button, hide send
+    const stopBtn = document.getElementById('chat-stop-btn');
+    const sendBtn = document.getElementById('chat-send-btn');
+    if (stopBtn) stopBtn.style.display = '';
+    if (sendBtn) sendBtn.style.display = 'none';
+
+    // One-time listener for completion
+    function onDone(ev) {
+      const msg = ev.detail;
+      if (msg.type === 'chat.done') {
+        wsClient.removeEventListener('message', onDone);
+        finalizeWsChat();
+        resolve();
+      } else if (msg.type === 'chat.error') {
+        wsClient.removeEventListener('message', onDone);
+        showChatError(msg.error);
+        reject(new Error(msg.error));
+      }
+    }
+    wsClient.addEventListener('message', onDone);
+
+    // Send via WS
+    const ok = wsClient.chatStart({ message: text, profile, session_id: sessionId });
+    if (!ok) {
+      wsClient.removeEventListener('message', onDone);
+      reject(new Error('WebSocket not connected'));
+    }
+  });
 }
 
 // ── CLI Fallback Chat (legacy) ──
@@ -1054,65 +1268,71 @@ function updateStreamContent(contentDiv, fullContent, toolCards, messagesDiv, el
 
 function renderChatContent(text) {
   if (!text) return '';
-  let html = escapeHtml(toDisplayText(text));
+  text = toDisplayText(text);
 
-  // Code blocks ```lang ... ```
-  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (match, lang, code) => {
-    const langClass = lang ? `language-${lang}` : '';
-    const langLabel = lang ? `<span style="position:absolute;top:4px;left:10px;font-size:9px;text-transform:uppercase;letter-spacing:0.06em;color:var(--fg-subtle);">${escapeHtml(lang)}</span>` : '';
-    return `<pre style="position:relative;">${langLabel}<button class="code-copy-btn" onclick="copyCodeBlock(this)">Copy</button><code class="${langClass}">${code.trim()}</code></pre>`;
+  // ── 1. Extract code blocks FIRST (before any escaping) ──
+  const codeBlocks = [];
+  let html = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (match, lang, code) => {
+    const id = codeBlocks.length;
+    codeBlocks.push({ lang: lang || '', code: escapeHtml(code.trimEnd()) });
+    return `\x00CODE${id}\x00`;
   });
 
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // ── 2. Escape everything outside code blocks ──
+  html = escapeHtml(html);
 
+  // ── 3. Markdown formatting (safe — text already escaped) ──
   // Bold
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-
   // Italic
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-  // Headers (### → h4, ## → h3, # → h2)
-  html = html.replace(/^### (.+)$/gm, '<h4 style="font-size:13px;font-weight:700;margin:10px 0 4px;color:var(--fg);">$1</h4>');
-  html = html.replace(/^## (.+)$/gm, '<h3 style="font-size:14px;font-weight:700;margin:12px 0 6px;color:var(--fg);">$1</h3>');
-  html = html.replace(/^# (.+)$/gm, '<h2 style="font-size:15px;font-weight:700;margin:14px 0 8px;color:var(--fg);">$1</h2>');
-
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Headers
+  html = html.replace(/^#### (.+)$/gm, '<h4 style="font-size:12px;font-weight:700;margin:8px 0 4px;color:var(--fg);">$1</h4>');
+  html = html.replace(/^### (.+)$/gm, '<h3 style="font-size:13px;font-weight:700;margin:10px 0 4px;color:var(--fg);">$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2 style="font-size:14px;font-weight:700;margin:12px 0 6px;color:var(--fg);">$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1 style="font-size:15px;font-weight:700;margin:14px 0 8px;color:var(--fg);">$1</h1>');
   // Blockquotes
-  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-
-  // Unordered lists (- item)
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>');
-  // Fix nested <ul> wrapping
-  html = html.replace(/<\/ul>\s*<ul>/g, '');
-
-  // Ordered lists (1. item)
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:3px solid var(--accent);padding-left:10px;margin:6px 0;color:var(--fg-subtle);">$1</blockquote>');
   // Links [text](url)
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-
   // Horizontal rules
   html = html.replace(/^---$/gm, '<hr style="border:none;border-top:1px solid var(--border);margin:10px 0;">');
 
-  // Tables (basic support)
-  html = html.replace(/\|(.+)\|\n\|[-| ]+\|\n((?:\|.+\|\n?)+)/g, (match, headerRow, bodyRows) => {
-    const headers = headerRow.split('|').map(h => h.trim()).filter(Boolean);
-    const rows = bodyRows.trim().split('\n').map(row =>
-      row.split('|').map(c => c.trim()).filter(Boolean)
+  // ── 4. Restore code blocks ──
+  codeBlocks.forEach((cb, i) => {
+    const langClass = cb.lang ? `language-${cb.lang}` : '';
+    const langLabel = cb.lang ? `<span style="position:absolute;top:4px;left:10px;font-size:9px;text-transform:uppercase;letter-spacing:0.06em;color:var(--fg-subtle);">${escapeHtml(cb.lang)}</span>` : '';
+    html = html.replace(
+      `\x00CODE${i}\x00`,
+      `<pre style="position:relative;padding-top:22px;">${langLabel}<button class="code-copy-btn" onclick="copyCodeBlock(this)">Copy</button><code class="${langClass}">${cb.code}</code></pre>`
     );
-    let table = '<table><thead><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>';
-    for (const row of rows) {
-      table += '<tr>' + row.map(c => `<td>${c}</td>`).join('') + '</tr>';
-    }
-    table += '</tbody></table>';
-    return table;
   });
 
-  // Line breaks (preserve double newlines as paragraph breaks)
-  html = html.replace(/\n\n/g, '</p><p>');
+  // ── 5. Lists (process after code blocks restored) ──
+  // Unordered lists
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>');
+  html = html.replace(/<\/ul>\s*<ul>/g, '');
+  // Ordered lists
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+  // ── 6. Paragraphs ──
+  // Split on double newlines, wrap each chunk in <p>
+  const chunks = html.split(/(?:&lt;br&gt;){2,}|\n\n/).filter(Boolean);
+  if (chunks.length > 1) {
+    html = chunks.map(c => {
+      const trimmed = c.trim();
+      if (trimmed.startsWith('<pre') || trimmed.startsWith('<blockquote') || trimmed.startsWith('<h') || trimmed.startsWith('<hr') || trimmed.startsWith('<ul') || trimmed.startsWith('<li')) return c;
+      return `<p>${trimmed}</p>`;
+    }).join('');
+  } else if (!html.startsWith('<') || html.startsWith('<em>') || html.startsWith('<strong>')) {
+    html = `<p>${html}</p>`;
+  }
+
+  // Single line breaks inside paragraphs → <br>
   html = html.replace(/\n/g, '<br>');
-  if (!html.startsWith('<')) html = '<p>' + html + '</p>';
 
   return html;
 }

@@ -758,6 +758,44 @@
   font-size: 12px;
 }
 
+/* ── Thinking Panel (real-time reasoning) ─────── */
+.chat-thinking-panel {
+  align-self: flex-start;
+  max-width: 85%;
+  background: var(--bg-card);
+  border-left: 3px solid var(--gold);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin: 2px 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+  line-height: 1.6;
+  animation: fadeIn 0.2s ease;
+}
+
+.thinking-header {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.thinking-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-style: italic;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* ═══════════════════════════════════════════════
    Mobile Responsive — DESIGN.md breakpoints
    ═══════════════════════════════════════════════ */
