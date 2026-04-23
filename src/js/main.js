@@ -1269,6 +1269,19 @@ function finalizeWsChat() {
   const sendBtn = document.getElementById('chat-send-btn');
   if (sendBtn) { sendBtn.style.display = ''; sendBtn.disabled = false; sendBtn.textContent = 'Send'; }
 
+  // Reset status indicator
+  const indicator = document.getElementById('agent-status-indicator');
+  if (indicator) {
+    indicator.textContent = 'ready';
+    indicator.className = 'status-idle';
+  }
+
+  // Hide subagent panel after delay
+  setTimeout(() => {
+    const panel = document.getElementById('subagent-panel');
+    if (panel && panel.children.length <= 1) panel.style.display = 'none';
+  }, 6000);
+
   // Always remove the streaming element
   const streamEl = document.getElementById('chat-streaming');
   if (streamEl) {
