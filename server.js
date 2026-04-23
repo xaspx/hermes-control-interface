@@ -17,6 +17,9 @@ const {
   parseHermesSessionsList,
 } = require('./lib/session-list');
 
+// ── TUI Gateway Bridge ──
+const { getBridge, killAllBridges } = require('./lib/tui-gateway-bridge');
+
 // ── LLM Pricing (via @pydantic/genai-prices) ──
 const { calcPrice } = require('@pydantic/genai-prices');
 
@@ -4602,19 +4605,57 @@ wss.on('connection', async (socket, req) => {
       if (msg.type === 'log-stop' && socket.authed) {
         stopLogStream();
       }
-      // ── Chat via WebSocket ──
+      // ── Chat via WebSocket (TUI Gateway) ──
       if (msg.type === 'chat.start' && socket.authed) {
-        handleWsChatStart(socket, msg);
+        const bridge = getBridge(msg.profile || 'default');
+        if (!bridge.proc) bridge.start();
+        bridge.addClient(socket);
+        socket.tuiBridge = bridge;
+        try {
+          const result = await bridge.chatStart(msg);
+          socket.tuiSessionId = result.session_id;
+        } catch (err) {
+          socket.send(JSON.stringify({ type: 'chat.error', error: err.message }));
+        }
       }
-      if (msg.type === 'chat.stop' && socket.authed) {
-        if (socket.activeChatReader) {
-          socket.activeChatReader.cancel().catch(() => {});
-          socket.activeChatReader = null;
+      if (msg.type === 'chat.stop' && socket.authed && socket.tuiBridge) {
+        socket.tuiBridge.chatStop(socket.tuiSessionId);
+      }
+      if (msg.type === 'clarify.respond' && socket.authed && socket.tuiBridge) {
+        try {
+          await socket.tuiBridge.respondClarify(msg.request_id, msg.text, msg.choice);
+        } catch (err) {
+          socket.send(JSON.stringify({ type: 'chat.error', error: err.message }));
+        }
+      }
+      if (msg.type === 'approval.respond' && socket.authed && socket.tuiBridge) {
+        try {
+          await socket.tuiBridge.respondApproval(msg.approve, msg.command);
+        } catch (err) {
+          socket.send(JSON.stringify({ type: 'chat.error', error: err.message }));
+        }
+      }
+      if (msg.type === 'sudo.respond' && socket.authed && socket.tuiBridge) {
+        try {
+          await socket.tuiBridge.respondSudo(msg.request_id, msg.password);
+        } catch (err) {
+          socket.send(JSON.stringify({ type: 'chat.error', error: err.message }));
+        }
+      }
+      if (msg.type === 'secret.respond' && socket.authed && socket.tuiBridge) {
+        try {
+          await socket.tuiBridge.respondSecret(msg.request_id, msg.value);
+        } catch (err) {
+          socket.send(JSON.stringify({ type: 'chat.error', error: err.message }));
         }
       }
     } catch {}
   });
   socket.on('close', () => {
+    if (socket.tuiBridge) {
+      socket.tuiBridge.removeClient(socket);
+      socket.tuiBridge = null;
+    }
     if (socket.activeChatReader) {
       socket.activeChatReader.cancel().catch(() => {});
       socket.activeChatReader = null;
@@ -4641,6 +4682,8 @@ setInterval(() => {
 // Graceful shutdown
 function shutdown(signal) {
   log('system.shutdown', `received ${signal}, shutting down gracefully`);
+  // Kill TUI bridges
+  killAllBridges();
   // Kill PTY process
   if (terminalSession.proc) {
     try { terminalSession.proc.kill(); } catch {}
