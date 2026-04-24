@@ -314,12 +314,78 @@ async function loadChat(container) {
         </div>
         <div class="chat-input-area">
           <textarea id="chat-input" placeholder="Type a message... (Enter to send)" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+          <span id="chat-queue-badge" class="queue-badge" style="display:none;">0</span>
           <button class="btn btn-primary" id="chat-send-btn" onclick="sendChatMessage()">Send</button>
           <button class="btn btn-danger btn-sm" id="chat-stop-btn" style="display:none;" onclick="stopChatStream()">Stop</button>
         </div>
       </div>
     </div>
   `;
+
+  // ── Keyboard shortcuts ──
+  document.addEventListener('keydown', (e) => {
+    const active = document.activeElement;
+    const isInput = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+
+    // Ctrl/Cmd + Enter = send
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      sendChatMessage();
+      return;
+    }
+
+    // Esc = stop stream or close modal
+    if (e.key === 'Escape') {
+      if (state._chatLock) {
+        e.preventDefault();
+        stopChatStream();
+      } else if (document.querySelector('.modal-overlay')) {
+        closeModal();
+      }
+      return;
+    }
+
+    // Ctrl/Cmd + N = new chat
+    if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+      e.preventDefault();
+      newChatSession();
+      return;
+    }
+
+    // Ctrl/Cmd + K = focus session search
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      const search = document.getElementById('chat-session-search');
+      if (search) search.focus();
+      return;
+    }
+
+    // Ctrl/Cmd + [ = toggle sidebar
+    if ((e.ctrlKey || e.metaKey) && e.key === 'BracketLeft') {
+      e.preventDefault();
+      toggleChatSidebar();
+      return;
+    }
+
+    // Ctrl/Cmd + / = show shortcuts help
+    if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+      e.preventDefault();
+      showModal({
+        title: 'Keyboard Shortcuts',
+        body: `<div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px;">
+          <kbd>Ctrl+Enter</kbd><span>Send message</span>
+          <kbd>Esc</kbd><span>Stop stream / close modal</span>
+          <kbd>Ctrl+N</kbd><span>New chat</span>
+          <kbd>Ctrl+K</kbd><span>Search sessions</span>
+          <kbd>Ctrl+[</kbd><span>Toggle sidebar</span>
+          <kbd>Shift+Enter</kbd><span>New line in input</span>
+        </div>`,
+        confirmText: 'Got it',
+      });
+      return;
+    }
+  });
+
 
   // Set default profile
   const profileSelect = document.getElementById('chat-profile');
@@ -339,13 +405,22 @@ async function loadChat(container) {
     });
   });
 
-  // Auto-resize textarea
+  // Auto-resize textarea + save draft
   const textarea = document.getElementById('chat-input');
   if (textarea) {
     textarea.addEventListener('input', () => {
       textarea.style.height = 'auto';
       textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+      // Save draft per session
+      const sid = state._currentChatSession || '_new';
+      try { localStorage.setItem('hci_chat_draft_' + sid, textarea.value); } catch {}
     });
+    // Restore draft
+    const sid = state._currentChatSession || '_new';
+    try {
+      const draft = localStorage.getItem('hci_chat_draft_' + sid);
+      if (draft) { textarea.value = draft; textarea.dispatchEvent(new Event('input')); }
+    } catch {}
   }
 
   // Mobile: always start sidebar collapsed (ignore localStorage)
@@ -410,6 +485,15 @@ async function refreshChatSidebar() {
     // Add normalized source to sessions
     sessions = sessions.map(s => ({ ...s, _source: normalizeSource(s) }));
 
+    // Sort: pinned first, then by last activity
+    const pinned = JSON.parse(localStorage.getItem('hci_pinned_sessions') || '[]');
+    sessions.sort((a, b) => {
+      const ap = pinned.includes(a.id) ? 1 : 0;
+      const bp = pinned.includes(b.id) ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return 0; // preserve API order (already sorted by last activity)
+    });
+
     // Get unique sources for filter
     const uniqueSources = [...new Set(sessions.map(s => s._source))].sort();
 
@@ -442,8 +526,9 @@ async function refreshChatSidebar() {
       const model = s.model || '';
       const modelTag = model ? `<span class="session-model-tag">${escapeHtml(model.split('/').pop())}</span>` : '';
       const sourceIcon = { telegram: '💬', discord: '💜', slack: '🟡', cron: '⏰', api_server: '🔌', cli: '⌨️', web: '🌐', other: '📝' }[s._source] || '';
-      html += `<div class="chat-session-item ${isActive ? 'active' : ''}" data-sid="${s.id}" data-title="${escapeHtml(title)}" onclick="loadChatSession('${s.id}')">
-        <div class="chat-session-title">${sourceIcon} ${escapeHtml(title.substring(0, 40))}</div>
+      const isPinned = pinned.includes(s.id);
+      html += `<div class="chat-session-item ${isActive ? 'active' : ''} ${isPinned ? 'pinned' : ''}" data-sid="${s.id}" data-title="${escapeHtml(title)}" onclick="loadChatSession('${s.id}')">
+        <div class="chat-session-title">${sourceIcon} ${escapeHtml(title.substring(0, 40))}<button class="session-pin-btn" onclick="event.stopPropagation();togglePinSession('${s.id}')" title="${isPinned?'Unpin':'Pin'}">${isPinned?'📌':'○'}</button></div>
         <div class="chat-session-meta">
           <span>${msgs} msgs</span>
           ${modelTag}
@@ -478,7 +563,7 @@ async function reloadCurrentSessionMessages() {
   if (statsEl) statsEl.textContent = sessionId;
 
   try {
-    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}&offset=${offset}&limit=50`, { credentials: 'include' });
     if (!r.ok) { console.warn('[Chat] reload messages failed:', r.status); return; }
     const data = await r.json();
 
@@ -501,16 +586,45 @@ async function reloadCurrentSessionMessages() {
     if (!data.messages || data.messages.length === 0) { console.warn('[Chat] no messages in session'); return; }
 
     // Rebuild messages cleanly
-    container.innerHTML = '';
+    // Lazy load older: prepend if offset > 0, else replace
+    if (offset === 0) {
+      container.innerHTML = '';
+    }
+    const frag = document.createDocumentFragment();
     for (const m of data.messages) {
-      container.appendChild(renderChatMessage(m));
+      frag.appendChild(renderChatMessage(m));
+    }
+    if (offset > 0 && container.firstChild) {
+      container.insertBefore(frag, container.firstChild);
+      // Remove old "Load older" button
+      const oldBtn = container.querySelector('.load-older-btn');
+      if (oldBtn) oldBtn.remove();
+    } else {
+      container.appendChild(frag);
+    }
+    // Add "Load older" button if we got 50 messages (more likely exist)
+    if (data.messages.length === 50 && offset === 0) {
+      const loadBtn = document.createElement('button');
+      loadBtn.className = 'load-older-btn';
+      loadBtn.textContent = '↑ Load older messages';
+      loadBtn.onclick = () => {
+        loadBtn.textContent = 'Loading...';
+        loadBtn.disabled = true;
+        loadChatSession(sessionId, offset + 50).then(() => {
+          loadBtn.remove();
+        }).catch(() => {
+          loadBtn.textContent = '↑ Load older messages';
+          loadBtn.disabled = false;
+        });
+      };
+      container.insertBefore(loadBtn, container.firstChild);
     }
     highlightCodeBlocks(container);
-    container.scrollTop = container.scrollHeight;
+    if (offset === 0) container.scrollTop = container.scrollHeight;
   } catch (e) { console.error('[Chat] reload messages error:', e); }
 }
 
-async function loadChatSession(sessionId) {
+async function loadChatSession(sessionId, offset = 0) {
   const profile = document.getElementById('chat-profile')?.value || 'default';
   const container = document.getElementById('chat-messages');
   const titleEl = document.getElementById('chat-title');
@@ -520,6 +634,18 @@ async function loadChatSession(sessionId) {
   if (!container) return;
   state._currentChatSession = sessionId || null;
   if (statsEl) statsEl.textContent = sessionId || '—';
+
+  // Restore draft for this session
+  const draftInput = document.getElementById('chat-input');
+  if (draftInput) {
+    try {
+      const draft = localStorage.getItem('hci_chat_draft_' + (sessionId || '_new'));
+      draftInput.value = draft || '';
+      draftInput.style.height = 'auto';
+      if (draft) draftInput.style.height = Math.min(draftInput.scrollHeight, 120) + 'px';
+    } catch {}
+  }
+
   container.innerHTML = '<div class="loading">Loading messages...</div>';
 
   // Highlight active in sidebar
@@ -533,7 +659,7 @@ async function loadChatSession(sessionId) {
   }
 
   try {
-    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}&offset=${offset}&limit=50`, { credentials: 'include' });
     if (!r.ok) { container.innerHTML = '<div class="error-msg">Failed to load messages</div>'; return; }
     const data = await r.json();
     if (titleEl) {
@@ -562,12 +688,41 @@ async function loadChatSession(sessionId) {
       return;
     }
 
-    container.innerHTML = '';
+    // Lazy load older: prepend if offset > 0, else replace
+    if (offset === 0) {
+      container.innerHTML = '';
+    }
+    const frag = document.createDocumentFragment();
     for (const m of data.messages) {
-      container.appendChild(renderChatMessage(m));
+      frag.appendChild(renderChatMessage(m));
+    }
+    if (offset > 0 && container.firstChild) {
+      container.insertBefore(frag, container.firstChild);
+      // Remove old "Load older" button
+      const oldBtn = container.querySelector('.load-older-btn');
+      if (oldBtn) oldBtn.remove();
+    } else {
+      container.appendChild(frag);
+    }
+    // Add "Load older" button if we got 50 messages (more likely exist)
+    if (data.messages.length === 50 && offset === 0) {
+      const loadBtn = document.createElement('button');
+      loadBtn.className = 'load-older-btn';
+      loadBtn.textContent = '↑ Load older messages';
+      loadBtn.onclick = () => {
+        loadBtn.textContent = 'Loading...';
+        loadBtn.disabled = true;
+        loadChatSession(sessionId, offset + 50).then(() => {
+          loadBtn.remove();
+        }).catch(() => {
+          loadBtn.textContent = '↑ Load older messages';
+          loadBtn.disabled = false;
+        });
+      };
+      container.insertBefore(loadBtn, container.firstChild);
     }
     highlightCodeBlocks(container);
-    container.scrollTop = container.scrollHeight;
+    if (offset === 0) container.scrollTop = container.scrollHeight;
   } catch (e) {
     container.innerHTML = '<div class="error-msg">' + escapeHtml(e.message) + '</div>';
   }
@@ -746,6 +901,14 @@ async function deleteChatSession(sessionId = 0) {
 }
 
 // ── Update chat header with session info ──
+
+function updateQueueBadge() {
+  const q = state._chatQueue || [];
+  const badge = document.getElementById('chat-queue-badge');
+  if (!badge) return;
+  badge.textContent = q.length;
+  badge.style.display = q.length > 0 ? '' : 'none';
+}
 function updateChatHeader() {
   const sid = state._currentChatSession;
   const titleEl = document.getElementById('chat-title');
@@ -764,15 +927,26 @@ function updateChatHeader() {
 }
 
 async function sendChatMessage() {
-  if (state._chatLock) return;
   const input = document.getElementById('chat-input');
   const text = input?.value?.trim();
   if (!text) return;
+
+  // Queue if busy
+  if (state._chatLock) {
+    if (!state._chatQueue) state._chatQueue = [];
+    state._chatQueue.push(text);
+    input.value = '';
+    input.style.height = 'auto';
+    updateQueueBadge();
+    return;
+  }
   const profile = document.getElementById('chat-profile')?.value || 'default';
   const sessionId = state._currentChatSession || null;
   input.value = '';
   input.style.height = 'auto';
   state._chatLock = true;
+  // Clear draft
+  try { localStorage.removeItem('hci_chat_draft_' + (state._currentChatSession || '_new')); } catch {}
   const btn = document.getElementById('chat-send-btn');
   if (btn) { btn.disabled = true; btn.textContent = '...'; }
   const messagesDiv = document.getElementById('chat-messages');
@@ -1295,10 +1469,25 @@ function finalizeWsChat() {
       const cursor = streamEl.querySelector('.chat-cursor');
       if (cursor) cursor.remove();
     }
+    // Fallback: if reload didn't run or failed, still remove the element
+    // after a short delay to prevent DOM accumulation
+    setTimeout(() => {
+      const el = document.getElementById('chat-streaming');
+      if (el) el.remove();
+    }, 500);
   }
   refreshChatSidebar();
   updateChatHeader();
   state._chatLock = false;
+
+  // Dequeue pending messages
+  if (state._chatQueue && state._chatQueue.length > 0) {
+    const next = state._chatQueue.shift();
+    updateQueueBadge();
+    const input = document.getElementById('chat-input');
+    if (input) { input.value = next; input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; }
+    setTimeout(() => sendChatMessage(), 300);
+  }
 }
 
 function showChatError(error) {
@@ -2440,7 +2629,7 @@ async function toggleSessionDetail(btn, sessionId, profile) {
   cell.innerHTML = '<div class="loading" style="padding:16px;">Loading messages...</div>';
 
   try {
-    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}&offset=${offset}&limit=50`, { credentials: 'include' });
     if (!r.ok) { cell.innerHTML = '<div class="error-msg" style="padding:16px;">Failed to load messages</div>'; return; }
     const data = await r.json();
     if (!data.messages || data.messages.length === 0) {
@@ -5982,6 +6171,19 @@ window.togglePwVis = function(btn) {
   const input = btn.previousElementSibling;
   if (input.type === 'password') { input.type = 'text'; btn.textContent = '🙈'; }
   else { input.type = 'password'; btn.textContent = '👁'; }
+};
+
+function _isSessionPinned(sid) {
+  try { return JSON.parse(localStorage.getItem('hci_pinned_sessions') || '[]').includes(sid); } catch { return false; }
+}
+window.togglePinSession = function(sid) {
+  try {
+    const list = JSON.parse(localStorage.getItem('hci_pinned_sessions') || '[]');
+    const idx = list.indexOf(sid);
+    if (idx >= 0) list.splice(idx, 1); else list.push(sid);
+    localStorage.setItem('hci_pinned_sessions', JSON.stringify(list));
+    refreshChatSidebar();
+  } catch {}
 };
 window.sendChatMessage = sendChatMessage;
 window.loadChatSession = loadChatSession;

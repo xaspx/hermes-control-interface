@@ -1078,3 +1078,102 @@
     border-radius: 14px 14px 14px 4px;
   }
 }
+
+
+/* ── Animations ── */
+@keyframes msgFadeIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes thinkingPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+@keyframes toolSlideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.chat-msg {
+  animation: msgFadeIn 0.25s ease-out;
+}
+.thinking-panel {
+  animation: msgFadeIn 0.2s ease-out;
+}
+.thinking-dot {
+  animation: thinkingPulse 1.2s ease-in-out infinite;
+}
+.tool-call-card {
+  animation: toolSlideIn 0.2s ease-out;
+}
+.chat-cursor {
+  animation: cursorBlink 1s step-end infinite;
+}
+
+/* Queue badge */
+.queue-badge {
+  position: absolute;
+  top: -6px;
+  right: 56px;
+  background: var(--gold);
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 8px;
+  min-width: 16px;
+  text-align: center;
+  z-index: 2;
+}
+
+/* Pin button */
+.session-pin-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 4px;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.session-pin-btn:hover { opacity: 1; }
+.chat-session-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Pinned sessions at top */
+.chat-session-item.pinned {
+  border-left: 2px solid var(--gold);
+  background: rgba(255, 172, 2, 0.06);
+}
+
+
+/* Load older messages button */
+.load-older-btn {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin: 8px 0;
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.load-older-btn:hover {
+  background: var(--bg-panel);
+  color: var(--fg);
+  border-style: solid;
+}
+.load-older-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

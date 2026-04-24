@@ -4609,10 +4609,22 @@ wss.on('connection', async (socket, req) => {
       if (msg.type === 'chat.start' && socket.authed) {
         const bridge = getBridge(msg.profile || 'default');
         if (!bridge.proc) {
-          try {
-            await bridge.start();
-          } catch (startErr) {
-            socket.send(JSON.stringify({ type: 'chat.error', error: startErr.message }));
+          let startErr = null;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              await bridge.start();
+              startErr = null;
+              break;
+            } catch (e) {
+              startErr = e;
+              console.error(`[WS] Bridge start attempt ${attempt}/3 failed:`, e.message);
+              if (attempt < 3) await new Promise(r => setTimeout(r, 500));
+            }
+          }
+          if (startErr) {
+            socket.send(JSON.stringify({ type: 'chat.error', error: 'TUI gateway unavailable after 3 retries. Falling back to CLI mode...' }));
+            // Don't return — let frontend fallback to CLI
+            // (frontend already has CLI fallback in sendChatMessage)
             return;
           }
         }
