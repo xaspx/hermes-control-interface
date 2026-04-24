@@ -2600,7 +2600,7 @@ async function toggleSessionDetail(btn, sessionId, profile) {
   cell.innerHTML = '<div class="loading" style="padding:16px;">Loading messages...</div>';
 
   try {
-    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}&offset=${offset}&limit=50`, { credentials: 'include' });
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}&offset=0&limit=50`, { credentials: 'include' });
     if (!r.ok) { cell.innerHTML = '<div class="error-msg" style="padding:16px;">Failed to load messages</div>'; return; }
     const data = await r.json();
     if (!data.messages || data.messages.length === 0) {
