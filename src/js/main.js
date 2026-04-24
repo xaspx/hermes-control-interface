@@ -563,7 +563,7 @@ async function reloadCurrentSessionMessages() {
   if (statsEl) statsEl.textContent = sessionId;
 
   try {
-    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}&offset=${offset}&limit=50`, { credentials: 'include' });
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
     if (!r.ok) { console.warn('[Chat] reload messages failed:', r.status); return; }
     const data = await r.json();
 
@@ -586,41 +586,12 @@ async function reloadCurrentSessionMessages() {
     if (!data.messages || data.messages.length === 0) { console.warn('[Chat] no messages in session'); return; }
 
     // Rebuild messages cleanly
-    // Lazy load older: prepend if offset > 0, else replace
-    if (offset === 0) {
-      container.innerHTML = '';
-    }
-    const frag = document.createDocumentFragment();
+    container.innerHTML = '';
     for (const m of data.messages) {
-      frag.appendChild(renderChatMessage(m));
-    }
-    if (offset > 0 && container.firstChild) {
-      container.insertBefore(frag, container.firstChild);
-      // Remove old "Load older" button
-      const oldBtn = container.querySelector('.load-older-btn');
-      if (oldBtn) oldBtn.remove();
-    } else {
-      container.appendChild(frag);
-    }
-    // Add "Load older" button if we got 50 messages (more likely exist)
-    if (data.messages.length === 50 && offset === 0) {
-      const loadBtn = document.createElement('button');
-      loadBtn.className = 'load-older-btn';
-      loadBtn.textContent = '↑ Load older messages';
-      loadBtn.onclick = () => {
-        loadBtn.textContent = 'Loading...';
-        loadBtn.disabled = true;
-        loadChatSession(sessionId, offset + 50).then(() => {
-          loadBtn.remove();
-        }).catch(() => {
-          loadBtn.textContent = '↑ Load older messages';
-          loadBtn.disabled = false;
-        });
-      };
-      container.insertBefore(loadBtn, container.firstChild);
+      container.appendChild(renderChatMessage(m));
     }
     highlightCodeBlocks(container);
-    if (offset === 0) container.scrollTop = container.scrollHeight;
+    container.scrollTop = container.scrollHeight;
   } catch (e) { console.error('[Chat] reload messages error:', e); }
 }
 
