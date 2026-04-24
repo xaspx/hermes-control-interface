@@ -259,6 +259,7 @@ async function loadChat(container) {
   } catch {}
   const profileOptions = profiles.map(p => `<option value="${p.name}">${p.name}${p.active ? ' ★' : ''}</option>`).join('');
   const defaultProfile = profiles.find(p => p.active)?.name || 'default';
+  state._defaultProfile = defaultProfile;
 
   // Sidebar state
   const sidebarCollapsed = state.chatSidebarOpen ? '' : ' collapsed';
@@ -807,6 +808,12 @@ function newChatSession() {
     </div>
   `;
   document.querySelectorAll('.chat-session-item').forEach(el => el.classList.remove('active'));
+
+  // Reset profile dropdown to default/active profile
+  const profileSelect = document.getElementById('chat-profile');
+  if (profileSelect && state._defaultProfile) {
+    profileSelect.value = state._defaultProfile;
+  }
 
   return null;
 }
@@ -1430,18 +1437,19 @@ function finalizeWsChat() {
   // Always remove the streaming element
   const streamEl = document.getElementById('chat-streaming');
   if (streamEl) {
-    // If we have a session, reload from DB for clean render
+    // FIRST: convert streaming element to a static message so user
+    // never loses content even if DB reload races or fails.
+    streamEl.removeAttribute('id');
+    streamEl.classList.remove('chat-streaming');
+    const cursor = streamEl.querySelector('.chat-cursor');
+    if (cursor) cursor.remove();
+
+    // THEN: reload from DB for clean render (if session exists)
     if (state._currentChatSession) {
       reloadCurrentSessionMessages().catch(console.error);
-    } else {
-      // No session yet — convert streaming element to a static message
-      streamEl.removeAttribute('id');
-      streamEl.classList.remove('chat-streaming');
-      const cursor = streamEl.querySelector('.chat-cursor');
-      if (cursor) cursor.remove();
     }
-    // Fallback: if reload didn't run or failed, still remove the element
-    // after a short delay to prevent DOM accumulation
+    // Fallback: if reload didn't run or failed, still remove any
+    // lingering streaming element after a short delay
     setTimeout(() => {
       const el = document.getElementById('chat-streaming');
       if (el) el.remove();
