@@ -4608,7 +4608,14 @@ wss.on('connection', async (socket, req) => {
       // ── Chat via WebSocket (TUI Gateway) ──
       if (msg.type === 'chat.start' && socket.authed) {
         const bridge = getBridge(msg.profile || 'default');
-        if (!bridge.proc) bridge.start();
+        if (!bridge.proc) {
+          try {
+            await bridge.start();
+          } catch (startErr) {
+            socket.send(JSON.stringify({ type: 'chat.error', error: startErr.message }));
+            return;
+          }
+        }
         bridge.addClient(socket);
         socket.tuiBridge = bridge;
         try {
