@@ -1289,16 +1289,26 @@ function handleMessageStart() {
 function handleTextDelta(delta) {
   const messagesDiv = document.getElementById('chat-messages');
   if (!messagesDiv) return;
+  // Re-query each time — streaming element may have been replaced by
+  // reloadCurrentSessionMessages() between callback invocations.
   const streamEl = document.getElementById('chat-streaming');
-  if (streamEl) {
-    const body = streamEl.querySelector('.msg-body');
-    if (body) {
-      let span = body.querySelector('#gw-stream-text');
-      if (!span) { span = document.createElement('span'); span.id = 'gw-stream-text'; body.insertBefore(span, body.querySelector('.chat-cursor')); }
-      span.textContent += delta;
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  if (!streamEl || !document.contains(streamEl)) return;
+  const body = streamEl.querySelector('.msg-body');
+  if (!body) return;
+  let span = body.querySelector('#gw-stream-text');
+  const cursor = body.querySelector('.chat-cursor');
+  if (!span) {
+    span = document.createElement('span');
+    span.id = 'gw-stream-text';
+    // Guard: cursor may have been removed by reloadCurrentSessionMessages
+    if (cursor && body.contains(cursor)) {
+      body.insertBefore(span, cursor);
+    } else {
+      body.appendChild(span);
     }
   }
+  span.textContent += delta;
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
 function handleStatusUpdate(status, kind) {
@@ -2614,7 +2624,7 @@ async function loadAgentDetail(container, params) {
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost" onclick="openTerminalPanel('Setup ${name}', 'hermes -p ${name} setup')">⚙ Setup</button>
-        <button class="btn btn-primary" onclick="openTerminalPanel('Terminal ${name}', 'hermes -p ${name}')">⌘ Terminal</button>
+        <button class="btn btn-primary" onclick="openTerminalPanel('Terminal ${name}', '${name} --tui')">⌘ Terminal</button>
         <button class="btn btn-ghost" onclick="navigate('agents')">← Back</button>
       </div>
     </div>
@@ -3078,7 +3088,7 @@ async function loadSessionStats(name) {
 
 async function resumeSession(sessionId) {
   const agent = state.currentAgent || state._defaultProfile || 'default';
-  const cmd = `hermes -p ${agent} -r ${sessionId}`;
+  const cmd = `${agent} --tui -r ${sessionId}`;
   openTerminalPanel(`Resume: ${sessionId}`, cmd);
 }
 
