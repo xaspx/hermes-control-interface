@@ -328,6 +328,12 @@ async function loadChat(container) {
           <input type="text" id="chat-session-search" class="search-input" placeholder="Search sessions..." />
           <button class="btn btn-primary btn-sm" style="width:100%;margin-top:6px;" onclick="newChatSession()">+ New Chat</button>
         </div>
+        <div id="chat-agent-panel" class="chat-agent-panel">
+          <div class="chat-agent-panel-title">🤖 Active Agent</div>
+          <div id="chat-agent-panel-body">
+            <!-- Populated by updateChatAgentPanel() -->
+          </div>
+        </div>
         <div class="chat-sidebar-list" id="chat-sidebar-list">
           <div class="loading">Loading sessions...</div>
         </div>
@@ -350,7 +356,6 @@ async function loadChat(container) {
           <div class="chat-header-right">
             <span id="chat-gateway-badge" class="chat-header-badge" title="Gateway status">🌐 …</span>
             <span class="chat-header-model-badge" id="chat-model-badge" style="display:none;"></span>
-            <button class="btn btn-ghost btn-sm" id="chat-info-toggle" title="Agent Info" onclick="toggleChatInfoPanel()">ℹ️</button>
             <button class="btn btn-ghost btn-sm" onclick="renameChatSession()" title="Rename">✏️</button>
             <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteChatSession()" title="Delete">🗑️</button>
           </div>
@@ -371,15 +376,6 @@ async function loadChat(container) {
           <span id="chat-queue-badge" class="queue-badge" style="display:none;">0</span>
           <button class="btn btn-primary" id="chat-send-btn" onclick="sendChatMessage()">Send</button>
           <button class="btn btn-danger btn-sm" id="chat-stop-btn" style="display:none;" onclick="stopChatStream()">Stop</button>
-        </div>
-      </div>
-      <div id="chat-info-panel" class="chat-info-panel collapsed">
-        <div class="chat-info-panel-header">
-          <span class="chat-info-panel-title">Agents</span>
-          <button class="chat-info-panel-close" onclick="toggleChatInfoPanel()">✕</button>
-        </div>
-        <div class="chat-info-panel-body" id="chat-info-panel-body">
-          <!-- Populated by updateChatInfoPanel() -->
         </div>
       </div>
     </div>
@@ -459,6 +455,7 @@ async function loadChat(container) {
 
   // Load sessions
   await refreshChatSidebar();
+  updateChatAgentPanel().catch(() => {}); // Populate sidebar agent panel
 
   // Profile change → refresh sidebar + update gateway badge
   // If switching to a non-default profile AND no active session (new-chat scenario),
@@ -491,7 +488,7 @@ async function loadChat(container) {
             state._defaultProfile = selected;
             profileSelect.value = selected; // Keep selector in sync with Hermes default
             showToast(`Default agent set to ${selected}`, 'success');
-            updateChatInfoPanel().catch(() => {}); // Refresh agent panel
+            updateChatAgentPanel().catch(() => {}); // Refresh agent panel
           } else {
             showToast(data.error || 'Failed to set default', 'error');
             profileSelect.value = hermesDefault;
@@ -510,7 +507,7 @@ async function loadChat(container) {
     }
     refreshChatSidebar();
     updateGatewayBadge().catch(() => {});
-    updateChatInfoPanel().catch(() => {}); // Refresh agent panel on profile change
+    updateChatAgentPanel().catch(() => {}); // Refresh agent panel on profile change
   });
 
   // Session search
@@ -967,34 +964,16 @@ function toggleChatSidebar() {
   }
 }
 
-function toggleChatInfoPanel() {
-  const panel = document.getElementById('chat-info-panel');
-  if (!panel) return;
-  const isCollapsed = panel.classList.contains('collapsed');
-  panel.classList.toggle('collapsed', !isCollapsed);
-  if (isCollapsed) {
-    updateChatInfoPanel();
-  }
-}
-
-// Update the agent info panel with current profile data
+// Update the sidebar agent panel with current profile data
 let _chatInfoProfiles = [];
-async function updateChatInfoPanel() {
-  const panel = document.getElementById('chat-info-panel');
-  if (!panel || panel.classList.contains('collapsed')) return;
-  const body = document.getElementById('chat-info-panel-body');
+async function updateChatAgentPanel() {
+  const body = document.getElementById('chat-agent-panel-body');
   if (!body) return;
 
-  // Refresh profile data
+  // Reuse cached profiles from sidebar refresh
   let profiles = _chatInfoProfiles;
-  try {
-    const res = await api('/api/profiles');
-    if (res.ok) profiles = res.profiles || [];
-    _chatInfoProfiles = profiles;
-  } catch { /* keep stale data */ }
-
   if (!profiles.length) {
-    body.innerHTML = '<div style="color:var(--fg-muted);font-size:13px;text-align:center;padding:16px;">No agents found</div>';
+    body.innerHTML = '<div style="color:var(--fg-muted);font-size:12px;text-align:center;padding:10px;">Loading...</div>';
     return;
   }
 
@@ -1002,46 +981,28 @@ async function updateChatInfoPanel() {
   const selectedName = document.getElementById('chat-profile')?.value || defaultAgent?.name || 'default';
   const selectedProfile = profiles.find(p => p.name === selectedName) || defaultAgent;
 
-  // Current agent card
+  // Current agent — prominent display
   const currentCard = selectedProfile ? `
-    <div class="chat-info-current-agent">
-      <div class="chat-info-agent-name">
-        <span class="status-dot"></span>
-        ${escapeHtml(selectedProfile.name)}
-      </div>
-      <div class="chat-info-agent-model">${escapeHtml(selectedProfile.model || '—')}</div>
-      <div class="chat-info-agent-gateway">🌐 ${escapeHtml(selectedProfile.gateway || '—')}</div>
+    <div class="agent-current">
+      <span class="agent-status-dot ${selectedProfile.gateway === 'running' ? 'running' : 'stopped'}"></span>
+      <span class="agent-current-name">${escapeHtml(selectedProfile.name)}</span>
+      ${selectedProfile.active ? '<span class="agent-badge-default">★ default</span>' : ''}
     </div>
+    <div class="agent-current-meta">${escapeHtml(selectedProfile.model || '—')}</div>
   ` : '';
 
-  // All agents list
+  // All agents compact list
   const agentItems = profiles.map(p => {
-    const isDefault = p.active;
-    const isSelected = p.name === selectedName;
-    const status = p.gateway === 'running' ? 'running' : 'stopped';
-    return `
-      <div class="chat-info-agent-item ${isDefault ? 'is-default' : ''}" title="Model: ${escapeHtml(p.model || '—')}\nGateway: ${escapeHtml(p.gateway || '—')}">
-        <span class="agent-dot ${status}"></span>
-        <div class="agent-info">
-          <div class="agent-name">${escapeHtml(p.name)}</div>
-          <div class="agent-model">${escapeHtml(p.model || '—')}</div>
-        </div>
-        ${isDefault ? '<span class="agent-badge default">★ default</span>' : ''}
-        ${isSelected && !isDefault ? '<span class="agent-badge active">selected</span>' : ''}
-      </div>
-    `;
+    const isRunning = p.gateway === 'running';
+    return `<div class="agent-list-item">
+      <span class="agent-list-dot ${isRunning ? 'running' : 'stopped'}"></span>
+      <span class="agent-list-name">${escapeHtml(p.name)}</span>
+      <span class="agent-list-model">${escapeHtml((p.model || '—').split('/').pop())}</span>
+      ${p.active ? '<span class="agent-badge-default">★</span>' : ''}
+    </div>`;
   }).join('');
 
-  body.innerHTML = `
-    <div class="chat-info-section">
-      <div class="chat-info-section-label">Current Agent</div>
-      ${currentCard}
-    </div>
-    <div class="chat-info-section">
-      <div class="chat-info-section-label">All Agents (${profiles.length})</div>
-      <div class="chat-info-agent-list">${agentItems}</div>
-    </div>
-  `;
+  body.innerHTML = currentCard + `<div class="agent-list">${agentItems}</div>`;
 }
 
 // Stop active chat stream (Gateway API or CLI or WS)
