@@ -459,11 +459,11 @@ async function loadChat(container) {
         title: 'Set as Default Agent?',
         message: `Switch to <strong>${escapeHtml(selected)}</strong> for new chats? This will change your default agent.`,
         buttons: [
-          { text: 'Cancel', primary: false },
-          { text: `Set as Default`, primary: true },
+          { text: 'Cancel', primary: false, value: false },
+          { text: `Set as Default`, primary: true, value: true },
         ],
       });
-      if (useDefault === null || useDefault === false) {
+      if (useDefault?.action === true) {
         // User cancelled — revert to Hermes default (don't apply selected for new chats)
         profileSelect.value = hermesDefault;
         refreshChatSidebar();
