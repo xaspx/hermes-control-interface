@@ -909,17 +909,6 @@ const terminalRateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-function formatBytes(bytes) {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let idx = 0;
-  let value = bytes;
-  while (value >= 1024 && idx < units.length - 1) {
-    value /= 1024;
-    idx += 1;
-  }
-  return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
-}
-
 function trimTerminalBuffer(text, limit = 50000) {
   const raw = String(text || '');
   return raw.length > limit ? raw.slice(raw.length - limit) : raw;
@@ -1165,17 +1154,6 @@ function buildExplorerRoot({ key, label, root }) {
     root,
     children: listDirectory(root, 0, 2, 140, root),
   };
-}
-
-function getProjects() {
-  try {
-    return fs.readdirSync(PROJECTS_ROOT, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && !IGNORED_DIRS.has(e.name))
-      .map((e) => ({ name: e.name, path: path.join(PROJECTS_ROOT, e.name) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  } catch {
-    return [];
-  }
 }
 
 function readLayoutStore() {

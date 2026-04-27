@@ -294,7 +294,7 @@ async function loadPage(page, params = {}) {
         container.innerHTML = `<div class="empty">Page not found</div>`;
     }
   } catch (err) {
-    container.innerHTML = `<div class="empty">Error loading page: ${err.message}</div>`;
+    container.innerHTML = `<div class="empty">Error loading page: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -1531,7 +1531,7 @@ function handleSubagentEvent(type, payload) {
     if (el) {
       const status = payload.status === 'completed' ? 'completed' : 'failed';
       const icon = payload.status === 'completed' ? '✅' : '❌';
-      el.innerHTML = `${icon} ${escapeHtml(payload.goal?.slice(0, 40) || 'Subagent')} <span class="subagent-status ${status}">${payload.status}</span>`;
+      el.innerHTML = `${icon} ${escapeHtml(payload.goal?.slice(0, 40) || 'Subagent')} <span class="subagent-status ${status}">${escapeHtml(payload.status || '')}</span>`;
       // Auto-remove after 5 seconds
       setTimeout(() => el?.remove(), 5000);
     }
@@ -2392,7 +2392,7 @@ async function loadHome(container) {
     loadHomeAuth();
 
   } catch (e) {
-    document.getElementById('home-cards').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+    document.getElementById('home-cards').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div></div>`;
   }
 }
 
@@ -2720,7 +2720,7 @@ async function loadAgents(container) {
       grid.innerHTML = '<div class="card"><div class="card-title">No agents found</div><div class="stat-row"><span class="stat-label">Create your first agent profile to get started.</span></div></div>';
     }
   } catch (e) {
-    document.getElementById('agents-grid').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+    document.getElementById('agents-grid').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div></div>`;
   }
 }
 
@@ -2853,7 +2853,7 @@ async function loadAgentDashboard(container, name) {
     `;
     loadTokenUsage(`agent-token-${name}`, 1);
   } catch (e) {
-    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div></div>`;
   }
 }
 
@@ -2919,7 +2919,7 @@ window.loadAgentSkills = async function(container, name) {
       </details>
     `;
   } catch (e) {
-    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div></div>`;
   }
 }
 
@@ -3035,7 +3035,7 @@ async function loadAgentSessions(container, name) {
       state.currentSessions = res.sessions;
       renderSessions('');
     } catch (e) {
-      tableEl.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+      tableEl.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div></div>`;
     }
   }
 
@@ -3395,7 +3395,7 @@ async function loadXtermAndConnect(command) {
     observer.observe(document.body, { childList: true });
 
   } catch (e) {
-    bodyEl.innerHTML = `<div style="color:var(--red);padding:20px;">Failed to load terminal: ${e.message}</div>`;
+    bodyEl.innerHTML = `<div style="color:var(--red);padding:20px;">Failed to load terminal: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -3495,7 +3495,7 @@ async function loadAgentGateway(container, name) {
     renderGatewayHealth(document.getElementById('gateway-health'), name);
 
   } catch (e) {
-    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div></div>`;
   }
 }
 
@@ -3616,7 +3616,7 @@ async function loadGatewayLogs(name) {
       viewer.innerHTML = '<div class="empty">No logs available</div>';
     }
   } catch (e) {
-    viewer.innerHTML = `<div class="error-msg">${e.message}</div>`;
+    viewer.innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -3912,7 +3912,7 @@ async function loadAgentConfig(container, name) {
     });
 
   } catch (e) {
-    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div></div>`;
   }
 }
 
@@ -4011,7 +4011,7 @@ async function loadAgentMemory(container, name) {
       </div>
     `;
   } catch (e) {
-    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+    container.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div></div>`;
   }
 }
 
@@ -4582,7 +4582,7 @@ async function loadSkills(container) {
 
       contentEl.innerHTML = html;
     } catch (e) {
-      contentEl.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+      contentEl.innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div></div>`;
     }
   }
 
@@ -4649,7 +4649,7 @@ window.inspectSkill = async function(name) {
       </div>
     `;
   } catch (e) {
-    overlay.querySelector('.modal-card').innerHTML = `<div class="modal-title">Error</div><div class="error-msg">${e.message}</div><button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()" style="margin-top:12px;">Close</button>`;
+    overlay.querySelector('.modal-card').innerHTML = `<div class="modal-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div><button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()" style="margin-top:12px;">Close</button>`;
   }
 }
 
@@ -4711,7 +4711,7 @@ window.doInstallSkill = async function(skillName) {
       if (statusEl) statusEl.innerHTML = `<div style="color:var(--err);margin-top:8px;">❌ ${escapeHtml(res.output || res.error || 'Install failed')}</div>`;
     }
   } catch (e) {
-    if (statusEl) statusEl.innerHTML = `<div style="color:var(--err);margin-top:8px;">❌ ${e.message}</div>`;
+    if (statusEl) statusEl.innerHTML = `<div style="color:var(--err);margin-top:8px;">❌ ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -4760,7 +4760,7 @@ async function loadUsersPage(container) {
       el.innerHTML = '<div class="stat-row"><span class="stat-label">No users</span></div>';
     }
   } catch (e) {
-    document.getElementById('users-page-list').innerHTML = `<div class="error-msg">${e.message}</div>`;
+    document.getElementById('users-page-list').innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
   }
 
   // Load audit log for the page
@@ -4807,7 +4807,7 @@ async function loadAuditLogPage() {
       el.innerHTML = '<div class="stat-row"><span class="stat-label">No audit entries</span></div>';
     }
   } catch (e) {
-    document.getElementById('audit-log-page').innerHTML = `<div class="error-msg">${e.message}</div>`;
+    document.getElementById('audit-log-page').innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -4940,7 +4940,7 @@ async function loadUsers() {
     }
   } catch (e) {
     const el = document.getElementById('users-list');
-    if (el) el.innerHTML = `<div class="error-msg">${e.message}</div>`;
+    if (el) el.innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -5215,7 +5215,7 @@ async function runDump() {
     const res = await api('/api/dump');
     el.innerHTML = `<pre style="font-size:10px;white-space:pre-wrap;max-height:300px;overflow-y:auto;color:var(--fg-muted);">${escapeHtml(res.output || 'No output')}</pre>`;
   } catch (e) {
-    el.innerHTML = `<div class="error-msg">${e.message}</div>`;
+    el.innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -6137,7 +6137,7 @@ async function loadFileExplorer(container, dirPath = '') {
 
     treeEl.innerHTML = breadcrumb + (itemsHtml || '<div class="empty">Empty directory</div>');
   } catch (e) {
-    document.getElementById('file-tree').innerHTML = `<div class="error-msg">${e.message}</div>`;
+    document.getElementById('file-tree').innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
   }
 }
 
