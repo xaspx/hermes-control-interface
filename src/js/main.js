@@ -464,32 +464,33 @@ async function loadChat(container) {
         ],
       });
       if (useDefault?.action === true) {
-        // User cancelled — revert to Hermes default (don't apply selected for new chats)
+        // User confirmed — call hermes profile use to switch Hermes CLI default
+        try {
+          const csrfToken = state.csrfToken || '';
+          const res = await fetch('/api/profiles/use', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            credentials: 'include',
+            body: JSON.stringify({ profile: selected }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            state._defaultProfile = selected;
+            showToast(`Default agent set to ${selected}`, 'success');
+          } else {
+            showToast(data.error || 'Failed to set default', 'error');
+            profileSelect.value = hermesDefault;
+          }
+        } catch (e) {
+          showToast('Failed to set default: ' + e.message, 'error');
+          profileSelect.value = hermesDefault;
+        }
+      } else {
+        // User cancelled or overlay-clicked — revert to Hermes default (do NOT apply selected for new chats)
         profileSelect.value = hermesDefault;
         refreshChatSidebar();
         updateGatewayBadge().catch(() => {});
         return;
-      }
-      // User confirmed — call hermes profile use to switch Hermes CLI default
-      try {
-        const csrfToken = state.csrfToken || '';
-        const res = await fetch('/api/profiles/use', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-          credentials: 'include',
-          body: JSON.stringify({ profile: selected }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          state._defaultProfile = selected;
-          showToast(`Default agent set to ${selected}`, 'success');
-        } else {
-          showToast(data.error || 'Failed to set default', 'error');
-          profileSelect.value = hermesDefault;
-        }
-      } catch (e) {
-        showToast('Failed to set default: ' + e.message, 'error');
-        profileSelect.value = hermesDefault;
       }
     }
     refreshChatSidebar();
@@ -651,9 +652,16 @@ function filterChatBySource(value) {
 }
 
 // Reload current session messages from DB (silent — no loading indicator)
+let _reloadInProgress = false;
 async function reloadCurrentSessionMessages() {
   const sessionId = state._currentChatSession;
   if (!sessionId) return;
+  // Guard: prevent concurrent calls (e.g., double finalizeWsChat race)
+  if (_reloadInProgress) {
+    console.warn('[Chat] reload already in progress, skipping duplicate call');
+    return;
+  }
+  _reloadInProgress = true;
   // Capture the session ID at call time so a concurrent session
   // switch cannot cause us to overwrite the new session's view with old data.
   const expectedSession = sessionId;
@@ -692,7 +700,7 @@ async function reloadCurrentSessionMessages() {
       modelBadge.style.display = 'none';
     }
 
-    if (!data.messages || data.messages.length === 0) { console.warn('[Chat] no messages in session'); return; }
+    if (!data.messages || data.messages.length === 0) { console.warn('[Chat] no messages in session'); _reloadInProgress = false; return; }
 
     // Rebuild messages cleanly
     container.innerHTML = '';
@@ -702,6 +710,7 @@ async function reloadCurrentSessionMessages() {
     highlightCodeBlocks(container);
     container.scrollTop = container.scrollHeight;
   } catch (e) { console.error('[Chat] reload messages error:', e); }
+  finally { _reloadInProgress = false; }
 }
 
 async function loadChatSession(sessionId, offset = 0) {
@@ -1585,6 +1594,13 @@ function ensureToolCards() {
 }
 
 function finalizeWsChat() {
+  // Guard: prevent double-call race. chat.done fires once from WS,
+  // but sendViaWebSocket also calls finalizeWsChat from onDone handler,
+  // and the finally block (sendChatMessage) also runs cleanup. Two calls
+  // cause reloadCurrentSessionMessages to race and destroy captured text.
+  if (state._finalizeInProgress) return;
+  state._finalizeInProgress = true;
+
   state._wsToolCards = null;
   const elapsed = ((Date.now() - (state._chatStartTime || 0)) / 1000).toFixed(1);
   const elapsedEl = document.getElementById('chat-status-elapsed');
@@ -1606,6 +1622,7 @@ function finalizeWsChat() {
     const panel = document.getElementById('subagent-panel');
     if (panel && panel.children.length <= 1) panel.style.display = 'none';
   }, 6000);
+
   // CAPTURE streaming text BEFORE removing streamEl.
   // chat.done fires BEFORE Hermes finishes writing the final message to SQLite,
   // so reloadCurrentSessionMessages() may miss the streaming content.
@@ -1636,7 +1653,14 @@ function finalizeWsChat() {
           }
         }
       }
-    }).catch(console.error);
+    }).finally(() => {
+      state._finalizeInProgress = false;
+    }).catch((e) => {
+      state._finalizeInProgress = false;
+      console.error('[Chat] reload error:', e);
+    });
+  } else {
+    state._finalizeInProgress = false;
   }
   refreshChatSidebar();
   updateChatHeader();
