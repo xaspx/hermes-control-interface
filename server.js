@@ -1099,8 +1099,10 @@ function safeStat(filePath) {
 }
 
 function readFileSafe(filePath, maxBytes = 120_000) {
+  // Use actual Hermes home (env var takes precedence, then config, then ~/.hermes)
+  const HERMES = process.env.HERMES_HOME || cfg.hermesHome || path.join(os.homedir(), '.hermes');
   const rel = String(filePath || '').replace(/^\/+/, '');
-  const abs = path.resolve(CONTROL_HOME, rel);
+  const abs = path.resolve(HERMES, rel);
   if (!isAllowedPath(abs)) throw new Error('path outside allowed roots');
   const stat = safeStat(abs);
   if (!stat) throw new Error('file not found');
@@ -1110,8 +1112,9 @@ function readFileSafe(filePath, maxBytes = 120_000) {
 }
 
 function writeFileSafe(filePath, content) {
+  const HERMES = process.env.HERMES_HOME || cfg.hermesHome || path.join(os.homedir(), '.hermes');
   const rel = String(filePath || '').replace(/^\/+/, '');
-  const abs = path.resolve(CONTROL_HOME, rel);
+  const abs = path.resolve(HERMES, rel);
   if (!isAllowedPath(abs)) throw new Error('path outside allowed roots');
   const stat = safeStat(abs);
   if (!stat) throw new Error('file not found');
@@ -1348,9 +1351,12 @@ async function getSessions() {
 let hermesAllSessionsCache = { at: 0, data: [] };
 
 function getStateDbPath(profile) {
-  return profile && profile !== 'default'
-    ? path.join(os.homedir(), '.hermes', 'profiles', profile, 'state.db')
-    : STATE_DB_PATH;
+  // Named profiles (soci, david, cuan…) live under profiles/{name}/state.db
+  // The default/unnamed profile uses Hermes root-level state.db
+  if (profile && profile !== 'default') {
+    return path.join(os.homedir(), '.hermes', 'profiles', profile, 'state.db');
+  }
+  return path.join(os.homedir(), '.hermes', 'state.db');
 }
 
 function loadSessionsFromDb(stateDbPath, limit = 250) {
@@ -2643,7 +2649,8 @@ app.get('/api/file', requireAuth, (req, res) => {
   if (!requested) return res.status(400).json({ error: 'path required' });
   try {
     const content = readFileSafe(requested);
-    return res.json({ ok: true, path: path.resolve(CONTROL_HOME, requested.replace(/^\/+/, '')), content });
+    const HERMES = process.env.HERMES_HOME || cfg.hermesHome || path.join(os.homedir(), '.hermes');
+    return res.json({ ok: true, path: path.resolve(HERMES, requested.replace(/^\/+/, '')), content });
   } catch (error) {
     const message = error.message || 'file read failed';
     const status = message.includes('EISDIR') ? 400 : message.includes('not found') ? 404 : 400;
@@ -3972,7 +3979,7 @@ app.get('/api/sessions/:id/messages', requireAuth, (req, res) => {
     const profile = sanitizeProfileName(req.query.profile);
     const stateDbPath = profile && profile !== 'default'
       ? path.join(os.homedir(), '.hermes', 'profiles', profile, 'state.db')
-      : STATE_DB_PATH;
+      : path.join(os.homedir(), '.hermes', 'state.db');
 
     if (!fs.existsSync(stateDbPath)) {
       return res.json({ ok: false, error: `state.db not found for profile: ${profile || 'default'}` });
@@ -4055,7 +4062,7 @@ app.get('/api/usage/:days', requireAuth, requirePerm('usage.view'), async (req, 
     if (profile) {
       const p = profile !== 'default'
         ? path.join(os.homedir(), '.hermes', 'profiles', profile, 'state.db')
-        : STATE_DB_PATH;
+        : path.join(os.homedir(), '.hermes', 'state.db');
       if (!fs.existsSync(p)) return res.json({ ok: false, error: 'state.db not found' });
       dbPaths = [{ profile: profile || 'default', path: p }];
     } else {
@@ -4069,8 +4076,9 @@ app.get('/api/usage/:days', requireAuth, requirePerm('usage.view'), async (req, 
         }
       }
       // Include default profile
-      if (fs.existsSync(STATE_DB_PATH)) {
-        dbPaths.push({ profile: 'default', path: STATE_DB_PATH });
+      const defaultDbPath = path.join(os.homedir(), '.hermes', 'state.db');
+      if (fs.existsSync(defaultDbPath)) {
+        dbPaths.push({ profile: 'default', path: defaultDbPath });
       }
       if (dbPaths.length === 0) return res.json({ ok: false, error: 'No state.db found' });
     }
@@ -4262,7 +4270,7 @@ app.get('/api/usage/daily/:days', requireAuth, requirePerm('usage.view'), async 
     const profile = sanitizeProfileName(req.query.profile);
     const stateDbPath = profile && profile !== 'default'
       ? path.join(os.homedir(), '.hermes', 'profiles', profile, 'state.db')
-      : STATE_DB_PATH;
+      : path.join(os.homedir(), '.hermes', 'state.db');
 
     if (!fs.existsSync(stateDbPath)) {
       return res.json({ ok: false, error: 'state.db not found' });

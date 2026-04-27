@@ -259,6 +259,10 @@ async function loadPage(page, params = {}) {
       case 'agents':
         await loadAgents(container);
         break;
+      case 'mon':
+        // MON page merged into Home — redirect
+        navigate('home');
+        break;
       case 'agent-detail':
         await loadAgentDetail(container, params);
         break;
@@ -1525,26 +1529,15 @@ function finalizeWsChat() {
     const panel = document.getElementById('subagent-panel');
     if (panel && panel.children.length <= 1) panel.style.display = 'none';
   }, 6000);
-  // Always remove the streaming element
+  // Remove streaming element and reload messages from DB for clean final render
   const streamEl = document.getElementById('chat-streaming');
-  if (streamEl) {
-    // FIRST: convert streaming element to a static message so user
-    // never loses content even if DB reload races or fails.
-    streamEl.removeAttribute('id');
-    streamEl.classList.remove('chat-streaming');
-    const cursor = streamEl.querySelector('.chat-cursor');
-    if (cursor) cursor.remove();
-
-    // THEN: reload from DB for clean render (if session exists)
-    if (state._currentChatSession) {
-      reloadCurrentSessionMessages().catch(console.error);
-    }
-    // Fallback: if reload didn't run or failed, still remove any
-    // lingering streaming element after a short delay
-    setTimeout(() => {
-      const el = document.getElementById('chat-streaming');
-      if (el) el.remove();
-    }, 500);
+  if (streamEl) streamEl.remove();
+  // Also remove any orphaned thinking panel
+  const thinkEl = document.getElementById('chat-thinking-panel');
+  if (thinkEl) thinkEl.remove();
+  // Reload from DB for clean final render
+  if (state._currentChatSession) {
+    reloadCurrentSessionMessages().catch(console.error);
   }
   refreshChatSidebar();
   updateChatHeader();
@@ -1698,7 +1691,7 @@ function addToolCallCard(contentDiv, callId, name, args) {
     </div>`;
   // Insert before cursor
   const cursor = contentDiv.querySelector('.chat-cursor');
-  if (cursor) {
+  if (cursor && contentDiv.contains(cursor)) {
     contentDiv.insertBefore(card, cursor);
   } else {
     contentDiv.appendChild(card);
@@ -2114,8 +2107,8 @@ async function loadHome(container) {
   `;
 
   try {
-    const [healthRes, profilesRes, agentRes, cronRes] = await Promise.all([
-      api('/api/system/health'),
+    const [monRes, profilesRes, agentRes, cronRes] = await Promise.all([
+      api('/api/monitoring'),
       api('/api/profiles'),
       api('/api/agent/status'),
       api('/api/cron/list', { method: 'POST', body: '{}' }),
@@ -2123,7 +2116,40 @@ async function loadHome(container) {
 
     // Row 1: System Health + Agent Overview (merged)
     const cardsEl = document.getElementById('home-cards');
-    if (healthRes.ok) {
+    if (monRes.ok) {
+      const m = monRes;
+      cardsEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">System Health</div>
+          <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value">${m.cpu || 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">RAM</span><span class="stat-value">${m.memory || 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Disk</span><span class="stat-value">${m.disk || 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Load</span><span class="stat-value">${m.load ? `${m.load.avg1}, ${m.load.avg5}, ${m.load.avg15}` : 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Processes</span><span class="stat-value">${m.processes || 0}</span></div>
+          <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-value">${m.uptime || 'N/A'}</span></div>
+        </div>
+        <div class="card">
+          <div class="card-title">System Details</div>
+          <div class="stat-row"><span class="stat-label">Network</span><span class="stat-value">${m.network ? `${m.network.interface} (${formatNumber(m.network.bytes)}B)` : 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Node RSS</span><span class="stat-value">${m.node_memory ? `${m.node_memory.rss_mb} MB` : 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Heap Used</span><span class="stat-value">${m.node_memory ? `${m.node_memory.heap_used_mb}/${m.node_memory.heap_total_mb} MB` : 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Hermes</span><span class="stat-value">${m.hermes_version || 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">HCI</span><span class="stat-value">${m.hci_version || 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Node.js</span><span class="stat-value">${m.node_version || 'N/A'}</span></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Agent Overview</div>
+          <div class="stat-row"><span class="stat-label">Model</span><span class="stat-value">${agentRes.ok ? (agentRes.model || 'N/A') : 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Provider</span><span class="stat-value">${agentRes.ok ? (agentRes.provider || 'N/A') : 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Gateway</span><span class="stat-value ${agentRes.ok && agentRes.gatewayStatus?.includes('running') ? 'status-ok' : 'status-off'}">${agentRes.ok ? (agentRes.gatewayStatus || 'N/A') : 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">API Keys</span><span class="stat-value">${agentRes.ok ? `${agentRes.apiKeys?.active || 0}/${agentRes.apiKeys?.total || 0} active` : 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Platforms</span><span class="stat-value">${agentRes.ok ? (agentRes.platforms?.filter(p => p.configured).map(p => p.name).join(', ') || 'None') : 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Cron</span><span class="stat-value">${cronRes?.jobs?.length || 0} jobs</span></div>
+          <div class="stat-row"><span class="stat-label">Sessions</span><span class="stat-value">${agentRes.ok ? `${agentRes.activeSessions || 0} active` : 'N/A'}</span></div>
+        </div>
+      `;
+    } else if (healthRes.ok) {
+      // Fallback to /api/system/health if /api/monitoring fails
       cardsEl.innerHTML = `
         <div class="card">
           <div class="card-title">System Health</div>
