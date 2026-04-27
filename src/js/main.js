@@ -448,7 +448,53 @@ async function loadChat(container) {
   await refreshChatSidebar();
 
   // Profile change → refresh sidebar + update gateway badge
-  profileSelect?.addEventListener('change', () => { refreshChatSidebar(); updateGatewayBadge().catch(()=>{}); });
+  // If switching to a non-default profile AND no active session (new-chat scenario),
+  // prompt the user to set it as their default agent.
+  profileSelect?.addEventListener('change', async () => {
+    const selected = profileSelect.value;
+    const hermesDefault = state._defaultProfile || 'default';
+    // Only prompt if: (1) not already the Hermes default, (2) no active session (new chat)
+    if (selected !== hermesDefault && !state._currentChatSession) {
+      const useDefault = await showModal({
+        title: 'Set as Default Agent?',
+        message: `Switch to <strong>${escapeHtml(selected)}</strong> for new chats? This will change your default agent.`,
+        buttons: [
+          { text: 'Cancel', primary: false },
+          { text: `Set as Default`, primary: true },
+        ],
+      });
+      if (useDefault === null || useDefault === false) {
+        // User cancelled — revert to Hermes default (don't apply selected for new chats)
+        profileSelect.value = hermesDefault;
+        refreshChatSidebar();
+        updateGatewayBadge().catch(() => {});
+        return;
+      }
+      // User confirmed — call hermes profile use to switch Hermes CLI default
+      try {
+        const csrfToken = state.csrfToken || '';
+        const res = await fetch('/api/profiles/use', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+          credentials: 'include',
+          body: JSON.stringify({ profile: selected }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          state._defaultProfile = selected;
+          showToast(`Default agent set to ${selected}`, 'success');
+        } else {
+          showToast(data.error || 'Failed to set default', 'error');
+          profileSelect.value = hermesDefault;
+        }
+      } catch (e) {
+        showToast('Failed to set default: ' + e.message, 'error');
+        profileSelect.value = hermesDefault;
+      }
+    }
+    refreshChatSidebar();
+    updateGatewayBadge().catch(() => {});
+  });
 
   // Session search
   document.getElementById('chat-session-search')?.addEventListener('input', (e) => {
@@ -1560,15 +1606,37 @@ function finalizeWsChat() {
     const panel = document.getElementById('subagent-panel');
     if (panel && panel.children.length <= 1) panel.style.display = 'none';
   }, 6000);
-  // Remove streaming element and reload messages from DB for clean final render
+  // CAPTURE streaming text BEFORE removing streamEl.
+  // chat.done fires BEFORE Hermes finishes writing the final message to SQLite,
+  // so reloadCurrentSessionMessages() may miss the streaming content.
   const streamEl = document.getElementById('chat-streaming');
-  if (streamEl) streamEl.remove();
+  let capturedText = '';
+  if (streamEl) {
+    const span = streamEl.querySelector('#gw-stream-text');
+    if (span) capturedText = span.textContent || '';
+    streamEl.remove();
+  }
   // Also remove any orphaned thinking panel
   const thinkEl = document.getElementById('chat-thinking-panel');
   if (thinkEl) thinkEl.remove();
-  // Reload from DB for clean final render
+
+  // Reload from DB for clean final render, then merge captured streaming text
+  // in case the final message hadn't been written to DB yet.
   if (state._currentChatSession) {
-    reloadCurrentSessionMessages().catch(console.error);
+    reloadCurrentSessionMessages().then(() => {
+      // Merge captured streaming text if the last assistant message has no body
+      if (capturedText) {
+        const messagesDiv = document.getElementById('chat-messages');
+        if (messagesDiv) {
+          const lastMsg = messagesDiv.querySelector('.msg-assistant:last-child');
+          const lastBody = lastMsg?.querySelector('.msg-body');
+          if (lastBody && !lastBody.textContent?.trim()) {
+            lastBody.innerHTML = renderChatContent(capturedText.substring(0, 8000));
+            highlightCodeBlocks(lastBody);
+          }
+        }
+      }
+    }).catch(console.error);
   }
   refreshChatSidebar();
   updateChatHeader();
