@@ -100,6 +100,21 @@ function showApp() {
   updateUserMenu();
   navigate(state.page);
   startNotifPolling();
+
+  // ── Phase 3: Session Restore ──
+  // Restore last session from localStorage after sidebar loads
+  const lastSid = localStorage.getItem('hci-last-session');
+  if (lastSid && state.page === 'chat') {
+    // Defer until sidebar sessions are loaded
+    setTimeout(() => {
+      const exists = document.querySelector(`.chat-session-item[data-sid="${lastSid}"]`);
+      if (exists) loadChatSession(lastSid);
+      else localStorage.removeItem('hci-last-session');
+    }, 800);
+  }
+
+  // Phase 3: init gateway health badge
+  if (state.page === 'chat') updateGatewayBadge().catch(() => {});
   // Connect WebSocket for real-time events — add listeners BEFORE connect to avoid race
   wsClient.addEventListener('open', () => {
     state._wsConnected = true;
@@ -318,6 +333,7 @@ async function loadChat(container) {
             </div>
           </div>
           <div class="chat-header-right">
+            <span id="chat-gateway-badge" class="chat-header-badge" title="Gateway status">🌐 …</span>
             <span class="chat-header-model-badge" id="chat-model-badge" style="display:none;"></span>
             <button class="btn btn-ghost btn-sm" onclick="renameChatSession()" title="Rename">✏</button>
             <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteChatSession()" title="Delete">🗑</button>
@@ -416,8 +432,8 @@ async function loadChat(container) {
   // Load sessions
   await refreshChatSidebar();
 
-  // Profile change → refresh sidebar
-  profileSelect?.addEventListener('change', () => { refreshChatSidebar(); });
+  // Profile change → refresh sidebar + update gateway badge
+  profileSelect?.addEventListener('change', () => { refreshChatSidebar(); updateGatewayBadge().catch(()=>{}); });
 
   // Session search
   document.getElementById('chat-session-search')?.addEventListener('input', (e) => {
@@ -626,6 +642,8 @@ async function loadChatSession(sessionId, offset = 0) {
   const tokensEl = document.getElementById('chat-status-tokens');
   if (!container) return;
   state._currentChatSession = sessionId || null;
+  if (sessionId) localStorage.setItem('hci-last-session', sessionId);
+  else localStorage.removeItem('hci-last-session');
   if (statsEl) statsEl.textContent = sessionId || '—';
 
   // Restore draft for this session
@@ -738,7 +756,7 @@ function renderChatMessage(msg) {
   // Header
   const header = document.createElement('div');
   header.className = 'msg-header';
-  header.innerHTML = `<span class="msg-header-label">${c.icon} ${c.label}</span>${ts ? `<span class="msg-header-time">${ts}</span>` : ''}`;
+  header.innerHTML = `<span class="msg-header-label">${c.icon} ${c.label}</span>${ts ? `<span class="msg-header-time">${ts}</span>` : ''}<button class="msg-menu-btn" onclick="toggleMsgMenu(this, '${role}')" title="Message options">⋮</button>`;
   div.appendChild(header);
 
   // Tool calls — render as collapsible cards
@@ -1907,6 +1925,55 @@ function updateWsConnectionUI(connected) {
       agentIndicator.textContent = 'reconnecting';
       agentIndicator.className = 'status-busy';
     }
+  }
+}
+
+/** Phase 3: Update gateway health badge in chat header */
+async function updateGatewayBadge() {
+  const badge = document.getElementById('chat-gateway-badge');
+  if (!badge) return;
+  const profile = document.getElementById('chat-profile')?.value || 'default';
+  try {
+    const res = await fetch(`/api/gateway/${encodeURIComponent(profile)}/health`);
+    if (!res.ok) throw new Error('not ok');
+    const data = await res.json();
+    if (data.healthy && data.port) {
+      badge.textContent = `🌐 ${data.port}`;
+      badge.className = 'chat-header-badge badge-healthy';
+      badge.title = `Gateway healthy — mode: ${data.gatewayMode}`;
+    } else {
+      badge.textContent = '⚠️ DOWN';
+      badge.className = 'chat-header-badge badge-down';
+      badge.title = (data.issues || []).join('; ');
+    }
+  } catch {
+    badge.textContent = '⚠️ ERR';
+    badge.className = 'chat-header-badge badge-down';
+    badge.title = 'Gateway health check failed';
+  }
+}
+
+/** Phase 3: Fork session from a specific message index */
+async function forkFromMessage(msgIndex) {
+  const sid = state._currentChatSession;
+  if (!sid) return;
+  const profile = document.getElementById('chat-profile')?.value || 'default';
+  try {
+    const res = await fetch(`/api/chat/fork?profile=${encodeURIComponent(profile)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': state.csrfToken || '' },
+      credentials: 'include',
+      body: JSON.stringify({ sessionId: sid, messageIndex: msgIndex }),
+    });
+    const data = await res.json();
+    if (data.ok && data.newSessionId) {
+      await refreshChatSidebar();
+      await loadChatSession(data.newSessionId);
+    } else {
+      console.warn('[Fork] failed:', data.error);
+    }
+  } catch (e) {
+    console.warn('[Fork] error:', e);
   }
 }
 
@@ -7019,5 +7086,41 @@ window.saveConfig = async function(profile, category) {
     }
   } catch (e) { showToast(e.message, 'error'); }
 };
+
+/** Phase 3: Toggle message ⋮ dropdown menu */
+function toggleMsgMenu(btn, role) {
+  // Close any existing menu first
+  closeMsgMenu();
+  // Build menu
+  const menu = document.createElement('div');
+  menu.className = 'msg-menu-dropdown';
+  menu.innerHTML = `<button class="msg-menu-item" onclick="forkFromMessageIdx(this)">🔱 Fork session here</button>`;
+  document.body.appendChild(menu);
+  // Position it relative to the button
+  const rect = btn.getBoundingClientRect();
+  menu.style.top = rect.bottom + window.scrollY + 2 + 'px';
+  menu.style.left = rect.left + window.scrollX + 'px';
+  // Store message index on the menu for the fork handler
+  const msgDiv = btn.closest('.chat-msg');
+  const msgs = Array.from(msgDiv.parentElement.querySelectorAll('.chat-msg'));
+  const idx = msgs.indexOf(msgDiv);
+  menu.dataset.msgIdx = idx;
+  menu.dataset.role = role;
+  // Close on outside click
+  setTimeout(() => { document.addEventListener('click', closeMsgMenu, { once: true }); }, 0);
+}
+
+/** Phase 3: Close message menu */
+function closeMsgMenu() {
+  document.querySelectorAll('.msg-menu-dropdown').forEach(m => m.remove());
+}
+
+/** Phase 3: Fork session from the stored message index */
+async function forkFromMessageIdx(el) {
+  closeMsgMenu();
+  const menu = el.closest('.msg-menu-dropdown');
+  const msgIdx = parseInt(menu?.dataset?.msgIdx || '0', 10);
+  await forkFromMessage(msgIdx);
+}
 
 init();

@@ -1285,3 +1285,72 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── Phase 3: Gateway health badge ── */
+.chat-header-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.badge-healthy {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+.badge-down {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* ── Phase 3: Message ⋮ menu button ── */
+.msg-menu-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--fg-subtle);
+  padding: 0 4px;
+  border-radius: 4px;
+  margin-left: auto;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+.chat-msg:hover .msg-menu-btn {
+  opacity: 1;
+}
+.msg-menu-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.msg-menu-dropdown {
+  position: absolute;
+  z-index: 1000;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  min-width: 160px;
+  padding: 4px;
+}
+.msg-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--fg);
+  border-radius: 5px;
+  transition: background 0.1s;
+}
+.msg-menu-item:hover {
+  background: var(--bg-hover);
+}

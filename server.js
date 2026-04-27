@@ -557,6 +557,160 @@ app.post('/api/chat/send', requireAuth, requirePerm('chat.use'), async (req, res
   }
 });
 
+// POST /api/chat/fork — create a new session forked from a source session up to message_index
+app.post('/api/chat/fork', requireAuth, requireCsrf, requirePerm('chat.use'), (req, res) => {
+  const { sessionId, messageIndex, profile } = req.body || {};
+  if (!sessionId || typeof sessionId !== 'string') {
+    return res.status(400).json({ error: 'sessionId required' });
+  }
+  if (messageIndex == null || typeof messageIndex !== 'number' || messageIndex < 0) {
+    return res.status(400).json({ error: 'messageIndex must be a non-negative number' });
+  }
+
+  const prof = sanitizeProfileName(profile) || 'default';
+  const stateDbPath = getStateDbPath(prof);
+
+  if (!fs.existsSync(stateDbPath)) {
+    return res.status(404).json({ error: 'session store not found for profile: ' + prof });
+  }
+
+  let db;
+  try {
+    db = new Database(stateDbPath, { readonly: false });
+
+    // Verify source session exists
+    const sourceSession = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+    if (!sourceSession) {
+      return res.status(404).json({ error: 'source session not found' });
+    }
+
+    // Get messages for the source session, ordered by id, up to message_index (inclusive, 0-based)
+    // We use id <= (SELECT MIN(id) FROM messages WHERE session_id = ? AND rowid > ...) approach
+    // Simpler: grab all messages for this session sorted by id, slice to messageIndex + 1
+    const messages = db.prepare(`
+      SELECT * FROM messages WHERE session_id = ? ORDER BY id ASC
+    `).all(sessionId);
+
+    if (messageIndex >= messages.length) {
+      return res.status(400).json({ error: 'messageIndex out of range for this session' });
+    }
+
+    const messagesToFork = messages.slice(0, messageIndex + 1);
+
+    // Generate new session ID: YYYYMMDD_HHMMSS_randomHex
+    const now = new Date();
+    const ts = now.toISOString().replace(/[-:T]/g, '').slice(0, 14).replace(/^(\d{8})(\d{6})$/, '$1_$2_');
+    const rand = crypto.randomBytes(4).toString('hex');
+    const newSessionId = ts + rand;
+
+    // Calculate message_count for forked session
+    const forkedMessageCount = messagesToFork.length;
+
+    // Copy the source session, but give it a new id and set parent_session_id
+    db.prepare(`
+      INSERT INTO sessions (
+        id, source, user_id, model, model_config, system_prompt,
+        parent_session_id, started_at, ended_at, end_reason,
+        message_count, tool_call_count, input_tokens, output_tokens,
+        cache_read_tokens, cache_write_tokens, reasoning_tokens,
+        billing_provider, billing_base_url, billing_mode,
+        estimated_cost_usd, actual_cost_usd, cost_status, cost_source,
+        pricing_version, title, api_call_count
+      ) VALUES (
+        @id, @source, @user_id, @model, @model_config, @system_prompt,
+        @parent_session_id, @started_at, @ended_at, @end_reason,
+        @message_count, @tool_call_count, @input_tokens, @output_tokens,
+        @cache_read_tokens, @cache_write_tokens, @reasoning_tokens,
+        @billing_provider, @billing_base_url, @billing_mode,
+        @estimated_cost_usd, @actual_cost_usd, @cost_status, @cost_source,
+        @pricing_version, @title, @api_call_count
+      )
+    `).run({
+      id: newSessionId,
+      source: sourceSession.source,
+      user_id: sourceSession.user_id,
+      model: sourceSession.model,
+      model_config: sourceSession.model_config,
+      system_prompt: sourceSession.system_prompt,
+      parent_session_id: sessionId,
+      started_at: Date.now() / 1000,
+      ended_at: null,
+      end_reason: null,
+      message_count: forkedMessageCount,
+      tool_call_count: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      reasoning_tokens: 0,
+      billing_provider: sourceSession.billing_provider,
+      billing_base_url: sourceSession.billing_base_url,
+      billing_mode: sourceSession.billing_mode,
+      estimated_cost_usd: null,
+      actual_cost_usd: null,
+      cost_status: null,
+      cost_source: null,
+      pricing_version: sourceSession.pricing_version,
+      title: sourceSession.title ? (sourceSession.title + ' (fork)') : null,
+      api_call_count: 0,
+    });
+
+    // Copy messages to the new session
+    const insertMsg = db.prepare(`
+      INSERT INTO messages (
+        session_id, role, content, tool_call_id, tool_calls, tool_name,
+        timestamp, token_count, finish_reason, reasoning, reasoning_details,
+        codex_reasoning_items, reasoning_content, codex_message_items
+      ) VALUES (
+        @session_id, @role, @content, @tool_call_id, @tool_calls, @tool_name,
+        @timestamp, @token_count, @finish_reason, @reasoning, @reasoning_details,
+        @codex_reasoning_items, @reasoning_content, @codex_message_items
+      )
+    `);
+
+    for (const msg of messagesToFork) {
+      insertMsg.run({
+        session_id: newSessionId,
+        role: msg.role,
+        content: msg.content,
+        tool_call_id: msg.tool_call_id,
+        tool_calls: msg.tool_calls,
+        tool_name: msg.tool_name,
+        timestamp: msg.timestamp,
+        token_count: msg.token_count,
+        finish_reason: msg.finish_reason,
+        reasoning: msg.reasoning,
+        reasoning_details: msg.reasoning_details,
+        codex_reasoning_items: msg.codex_reasoning_items,
+        reasoning_content: msg.reasoning_content,
+        codex_message_items: msg.codex_message_items,
+      });
+    }
+
+    // Invalidate sessions caches so the new session appears
+    hermesSidebarSessionsCache = { at: 0, data: [] };
+    hermesAllSessionsCache = { at: 0, data: [] };
+
+    res.json({
+      ok: true,
+      newSessionId,
+      forkedSession: {
+        id: newSessionId,
+        title: sourceSession.title ? (sourceSession.title + ' (fork)') : null,
+        parent_session_id: sessionId,
+        message_count: forkedMessageCount,
+        model: sourceSession.model,
+        started_at: Date.now() / 1000,
+      },
+    });
+  } catch (e) {
+    console.error('[chat.fork] error:', e.message);
+    res.status(500).json({ error: 'failed to fork session: ' + e.message });
+  } finally {
+    if (db) db.close();
+  }
+});
+
 // ── Model Info — read from config.yaml ──
 app.get('/api/models', requireAuth, async (req, res) => {
   try {
