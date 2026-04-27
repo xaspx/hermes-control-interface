@@ -4,6 +4,7 @@
 import { Chart, registerables } from 'chart.js';
 import { toDisplayText } from './chat-render-utils.mjs';
 import { resolveSessionDisplayTitle } from './session-title-utils.mjs';
+import { SSE_EVENT_TYPES, mapWsType } from '../../lib/sse-events.js';
 import { wsClient } from './ws-client.js';
 Chart.register(...registerables);
 
@@ -17,7 +18,15 @@ const state = {
   notifInterval: null,
   notifFailCount: 0,
   _currentChatSession: null,
+  _optMessages: null, // Map<optId, {text, el, ts}>
+  _recentMessages: null, // Ring buffer for dedup {role, content, ts}[]
   chatSidebarOpen: localStorage.getItem('hci-chat-sidebar') !== 'false',
+  _wsConnected: false, // WebSocket connection state
+  _soundEnabled: false, // Sound notification preference
+  _soundReady: false, // Audio element initialized
+  _soundEl: null, // Audio element ref
+  _wsToolCount: 0, // Live count of running tools
+  _artifactCount: 0, // Live count of artifacts created
   auditDisplayLimit: 15,
 };
 
@@ -93,6 +102,14 @@ function showApp() {
   startNotifPolling();
   // Connect WebSocket for real-time events
   wsClient.connect();
+  wsClient.addEventListener('open', () => {
+    state._wsConnected = true;
+    updateWsConnectionUI(true);
+  });
+  wsClient.addEventListener('close', () => {
+    state._wsConnected = false;
+    updateWsConnectionUI(false);
+  });
   setupWsChatHandlers();
 }
 
@@ -923,6 +940,10 @@ async function sendChatMessage() {
   input.value = '';
   input.style.height = 'auto';
   state._chatLock = true;
+  // Initialize optimistic + dedup state
+  if (!state._optMessages) state._optMessages = new Map();
+  if (!state._recentMessages) state._recentMessages = { buf: [], max: 20 };
+
   // Clear draft
   try { localStorage.removeItem('hci_chat_draft_' + (state._currentChatSession || '_new')); } catch {}
   const btn = document.getElementById('chat-send-btn');
@@ -931,7 +952,13 @@ async function sendChatMessage() {
   if (messagesDiv) {
     const existing = messagesDiv.querySelector('[style*="text-align:center"]');
     if (existing) existing.remove();
-    messagesDiv.appendChild(createMessageDiv('user', text));
+    // Optimistic ID: tag user message so we can swap if needed
+    const optId = 'opt-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+    const msgEl = createMessageDiv('user', text, optId);
+    messagesDiv.appendChild(msgEl);
+    // Track for dedup + optimistic swap
+    state._optMessages.set(optId, { text, el: msgEl, ts: Date.now() });
+    addToDedupBuf('user', text);
   }
   const streamEl = document.createElement('div');
   streamEl.id = 'chat-streaming';
@@ -1087,6 +1114,20 @@ function handleGatewayEvent(evt, contentDiv, messagesDiv, toolCards) {
       // Don't overwrite session_id from hci.session or header
       if (!state._currentChatSession) state._currentChatSession = evt.response.id;
     }
+  } else if (t === 'artifact.created') {
+    handleArtifact(evt.artifact || evt);
+  } else if (t === 'artifact.chunk') {
+    // Accumulate artifact chunks — append to latest artifact card
+    const messagesDiv = document.getElementById('chat-messages');
+    const lastArtifact = messagesDiv?.querySelector('.artifact-card:last-of-type');
+    if (lastArtifact) {
+      const contentEl = lastArtifact.querySelector('.artifact-content');
+      if (contentEl && evt.chunk) {
+        contentEl.textContent = (contentEl.textContent || '') + evt.chunk;
+      }
+    }
+  } else if (t === 'subagent.completed' || t === 'chat.subagent.done') {
+    handleSubagentEvent('done', evt.payload || evt);
   }
 }
 
@@ -1122,9 +1163,13 @@ function setupWsChatHandlers() {
       case 'chat.tool.done':
         handleToolDone(msg.tool_id, msg.name, msg.summary, msg.error, msg.inline_diff);
         break;
+      case 'chat.artifact':
+        handleArtifact(msg.artifact || msg);
+        break;
       case 'chat.session':
         state._currentChatSession = msg.session_id;
         state._sessionInfo = msg.info;
+        swapOptimisticMessage(msg.session_id);
         updateChatHeader();
         break;
       case 'chat.done':
@@ -1239,6 +1284,9 @@ function handleToolStart(toolId, name, context) {
     tc.set(toolId, card);
   }
   if (messagesDiv) messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  // Live tool count indicator
+  state._wsToolCount = (state._wsToolCount || 0) + 1;
+  updateToolCountUI();
 }
 
 function handleToolProgress(name, preview) {
@@ -1260,16 +1308,27 @@ function handleToolDone(toolId, name, summary, error, inlineDiff) {
     }
     const resultEl = card.querySelector('.tool-card-result');
     if (resultEl) {
-      if (error) {
-        resultEl.innerHTML = `<span style="color:var(--red)">❌ ${escapeHtml(error)}</span>`;
-      } else if (inlineDiff) {
-        resultEl.innerHTML = `<pre>${escapeHtml(inlineDiff)}</pre>`;
-      } else if (summary) {
-        resultEl.textContent = summary;
+      let resultText = error || '';
+      if (!error && inlineDiff) {
+        resultText = inlineDiff;
+      } else if (!error && summary) {
+        resultText = summary;
+      }
+      // 4000-char truncation with expand-on-click
+      if (resultText.length > 4000) {
+        resultEl.innerHTML = `
+          <pre class="tool-result-truncated">${escapeHtml(resultText.substring(0, 4000))}</pre>
+          <button class="tool-expand-btn" onclick="this.previousElementSibling.classList.toggle('tool-result-truncated'); this.previousElementSibling.classList.toggle('tool-result-full'); this.textContent = this.previousElementSibling.classList.contains('tool-result-full') ? 'Show less' : 'Show more (${(resultText.length - 4000).toLocaleString()} more chars)';">Show more (${(resultText.length - 4000).toLocaleString()} more chars)</button>`;
+        resultEl.classList.add('has-expand');
+      } else {
+        resultEl.innerHTML = `<pre>${escapeHtml(resultText)}</pre>`;
       }
     }
     tc.delete(toolId);
   }
+  // Decrement live tool count
+  state._wsToolCount = Math.max(0, (state._wsToolCount || 1) - 1);
+  updateToolCountUI();
 }
 
 function handleSubagentEvent(type, payload) {
@@ -1433,7 +1492,6 @@ function finalizeWsChat() {
     const panel = document.getElementById('subagent-panel');
     if (panel && panel.children.length <= 1) panel.style.display = 'none';
   }, 6000);
-
   // Always remove the streaming element
   const streamEl = document.getElementById('chat-streaming');
   if (streamEl) {
@@ -1458,6 +1516,8 @@ function finalizeWsChat() {
   refreshChatSidebar();
   updateChatHeader();
   state._chatLock = false;
+  // Play completion sound if enabled
+  playChatComplete();
 
   // Dequeue pending messages
   if (state._chatQueue && state._chatQueue.length > 0) {
@@ -1629,8 +1689,16 @@ function finalizeToolCard(toolCards, callId, result) {
   el.classList.add('expanded');
   const resultEl = el.querySelector(`#tool-result-${callId}`) || el.querySelector('.tool-card-result');
   if (resultEl && result) {
-    const display = typeof result === 'string' ? result.substring(0, 500) : JSON.stringify(result).substring(0, 500);
-    resultEl.innerHTML = `<pre>${escapeHtml(display)}</pre>`;
+    const display = typeof result === 'string' ? result.substring(0, 4000) : JSON.stringify(result).substring(0, 4000);
+    const fullLen = typeof result === 'string' ? result.length : JSON.stringify(result).length;
+    if (fullLen > 4000) {
+      resultEl.innerHTML = `
+        <pre class="tool-result-truncated">${escapeHtml(display)}</pre>
+        <button class="tool-expand-btn" onclick="this.previousElementSibling.classList.toggle('tool-result-truncated'); this.previousElementSibling.classList.toggle('tool-result-full'); this.textContent = this.previousElementSibling.classList.contains('tool-result-full') ? 'Show less' : 'Show more (${(fullLen - 4000).toLocaleString()} more chars)';">Show more (${(fullLen - 4000).toLocaleString()} more chars)</button>`;
+      resultEl.classList.add('has-expand');
+    } else {
+      resultEl.innerHTML = `<pre>${escapeHtml(display)}</pre>`;
+    }
   }
 }
 
@@ -1761,15 +1829,192 @@ function highlightCodeBlocks(container) {
   });
 }
 
-function createMessageDiv(role, content) {
+function createMessageDiv(role, content, optId) {
   const cls = { user: 'msg-user', assistant: 'msg-assistant' }[role] || 'msg-assistant';
+  // Dedup: skip if exact user message with same content was sent in last 10s
+  if (role === 'user' && isDuplicateUserMessage(content)) {
+    console.warn('[Chat] Skipping duplicate user message');
+    return document.createElement('div'); // empty, invisible
+  }
   const div = document.createElement('div');
   div.className = `chat-msg ${cls}`;
+  if (optId) div.dataset.optId = optId;
   const body = document.createElement('div');
   body.className = 'msg-body';
   body.textContent = content;
   div.appendChild(body);
   return div;
+}
+
+/** 3-layer dedup buffer */
+function addToDedupBuf(role, content) {
+  if (!state._recentMessages) state._recentMessages = { buf: [], max: 20 };
+  const b = state._recentMessages;
+  b.buf.unshift({ role, content, ts: Date.now() });
+  if (b.buf.length > b.max) b.buf.length = b.max;
+}
+
+/** Check if user message is a dupe within 10s / last 5 messages */
+function isDuplicateUserMessage(content) {
+  const b = state._recentMessages?.buf;
+  if (!b?.length) return false;
+  const win = 10000; // 10 seconds
+  const recent = b.slice(0, 5);
+  return recent.some(m => m.role === 'user' && m.content === content && Date.now() - m.ts < win);
+}
+
+/** Swap optimistic user message when server confirms session */
+function swapOptimisticMessage(sessionId) {
+  if (!state._currentChatSession && sessionId) {
+    state._currentChatSession = sessionId;
+  }
+  if (state._optMessages?.size > 0) {
+    // Clear optimistic markers once we have a real session
+    for (const [optId, entry] of state._optMessages) {
+      if (entry.el) entry.el.dataset.optId = '';
+    }
+    state._optMessages.clear();
+  }
+}
+
+/** Update chat UI connection status indicator */
+function updateWsConnectionUI(connected) {
+  // Find or create the connection indicator in chat header
+  let indicator = document.getElementById('ws-conn-indicator');
+  if (!indicator) {
+    // Create it — insert into chat-header-status area
+    const header = document.getElementById('chat-header-status');
+    if (header) {
+      indicator = document.createElement('span');
+      indicator.id = 'ws-conn-indicator';
+      indicator.title = 'WebSocket connection';
+      header.appendChild(indicator);
+    }
+  }
+  if (indicator) {
+    indicator.textContent = connected ? '🟢 ws' : '🔴 ws';
+    indicator.title = connected ? 'WebSocket connected' : 'WebSocket disconnected — reconnecting...';
+    indicator.style.cssText = 'font-size:10px;margin-left:6px;cursor:default;';
+  }
+  // Also update agent-status-indicator if it exists
+  const agentIndicator = document.getElementById('agent-status-indicator');
+  if (agentIndicator) {
+    if (!connected) {
+      agentIndicator.textContent = 'reconnecting';
+      agentIndicator.className = 'status-busy';
+    }
+  }
+}
+
+/** Play a subtle completion sound when a chat response finishes */
+function playChatComplete() {
+  if (!state._soundEnabled) return;
+  if (!state._soundEl) {
+    // Create a simple beep using Web Audio API
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      // Ascending double-beep: C5 (523Hz) then C6 (1047Hz)
+      for (let i = 0; i < data.length; i++) {
+        const t = i / ctx.sampleRate;
+        const freq1 = 523, freq2 = 1047;
+        const beepDur = 0.06;
+        const fade = Math.min(i, data.length - i) / (ctx.sampleRate * 0.015);
+        data[i] = (t < beepDur ? Math.sin(2 * Math.PI * freq1 * t) * fade :
+                  t < beepDur * 2 ? 0 : Math.sin(2 * Math.PI * freq2 * (t - beepDur * 2)) * 0.6 * fade) * 0.25;
+      }
+      state._soundEl = ctx;
+      state._soundReady = true;
+    } catch (e) {
+      console.warn('[Chat] AudioContext not available:', e);
+      return;
+    }
+  }
+  try {
+    const src = state._soundEl.createBufferSource();
+    src.buffer = state._soundEl.createBuffer(1, state._soundEl.sampleRate * 0.12, state._soundEl.sampleRate);
+    const data = src.buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / state._soundEl.sampleRate;
+      const freq1 = 523, freq2 = 1047, beepDur = 0.06;
+      const fade = Math.min(i, data.length - i) / (state._soundEl.sampleRate * 0.015);
+      data[i] = (t < beepDur ? Math.sin(2 * Math.PI * freq1 * t) :
+                t < beepDur * 2 ? 0 : Math.sin(2 * Math.PI * freq2 * (t - beepDur * 2)) * 0.6) * 0.2 * fade;
+    }
+    const gain = state._soundEl.createGain();
+    gain.gain.value = 0.4;
+    src.connect(gain);
+    gain.connect(state._soundEl.destination);
+    src.start();
+  } catch (e) {
+    console.warn('[Chat] Failed to play completion sound:', e);
+  }
+}
+
+/** Toggle chat sound notifications */
+function toggleChatSound() {
+  state._soundEnabled = !state._soundEnabled;
+  const btn = document.getElementById('chat-sound-btn');
+  if (btn) btn.textContent = state._soundEnabled ? '🔔' : '🔕';
+  // Init AudioContext on first enable (must be from user gesture)
+  if (state._soundEnabled && !state._soundEl) {
+    try {
+      state._soundEl = new (window.AudioContext || window.webkitAudioContext)();
+      state._soundReady = true;
+    } catch (e) { /* AudioContext blocked until user gesture */ }
+  }
+  return state._soundEnabled;
+}
+
+/** Update live "running tools" count indicator in chat header */
+function updateToolCountUI() {
+  const count = state._wsToolCount || 0;
+  let indicator = document.getElementById('tool-count-indicator');
+  if (!indicator) {
+    const header = document.getElementById('chat-header-status');
+    if (header) {
+      indicator = document.createElement('span');
+      indicator.id = 'tool-count-indicator';
+      header.appendChild(indicator);
+    }
+  }
+  if (indicator) {
+    if (count > 0) {
+      indicator.textContent = `🔨 ${count} tool${count > 1 ? 's' : ''} running`;
+      indicator.style.cssText = 'font-size:10px;margin-left:6px;color:var(--gold);cursor:default;';
+    } else {
+      indicator.textContent = '';
+    }
+  }
+}
+
+/** Render an artifact card from the gateway */
+function handleArtifact(artifact) {
+  if (!artifact) return;
+  const messagesDiv = document.getElementById('chat-messages');
+  if (!messagesDiv) return;
+  const type = artifact.type || 'file';
+  const name = artifact.name || 'artifact';
+  const description = artifact.description || '';
+  const content = artifact.content || '';
+  const language = artifact.language || '';
+
+  const card = document.createElement('div');
+  card.className = 'artifact-card';
+  card.innerHTML = `
+    <div class="artifact-header" onclick="this.parentElement.classList.toggle('expanded')">
+      <span class="artifact-icon">${type === 'code' ? '💻' : type === 'image' ? '🖼️' : type === 'text' ? '📄' : '📦'}</span>
+      <span class="artifact-name">${escapeHtml(name)}</span>
+      ${description ? `<span class="artifact-desc">${escapeHtml(description)}</span>` : ''}
+      <span class="artifact-chevron">▶</span>
+    </div>
+    <div class="artifact-body">
+      ${content ? `<pre class="artifact-content ${language ? 'language-' + escapeHtml(language) : ''}">${escapeHtml(content.substring(0, 8000))}</pre>` : '<div class="artifact-empty">No content</div>'}
+    </div>`;
+  messagesDiv.appendChild(card);
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  state._artifactCount = (state._artifactCount || 0) + 1;
 }
 
 // ============================================

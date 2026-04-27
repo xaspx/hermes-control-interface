@@ -615,6 +615,114 @@
   font-family: var(--font);
 }
 
+.tool-result-truncated {
+  max-height: 120px;
+  overflow: hidden;
+  position: relative;
+}
+
+.tool-result-full {
+  max-height: none;
+}
+
+.tool-expand-btn {
+  background: none;
+  border: none;
+  color: var(--fg-link, #4ecdc4);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 0;
+  text-decoration: underline;
+}
+
+.tool-expand-btn:hover {
+  color: var(--gold);
+}
+
+/* ── Artifact Cards ── */
+.artifact-card {
+  margin: 4px 0;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  border-left: 3px solid var(--teal);
+  font-size: 12px;
+  overflow: hidden;
+  font-family: var(--font);
+}
+
+.artifact-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.artifact-header:hover {
+  background: rgba(78, 205, 196, 0.06);
+}
+
+.artifact-icon {
+  font-size: 12px;
+  color: var(--teal);
+}
+
+.artifact-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--teal);
+  flex: 1;
+}
+
+.artifact-desc {
+  font-size: 10px;
+  color: var(--fg-subtle);
+  flex: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-chevron {
+  font-size: 10px;
+  color: var(--fg-subtle);
+  transition: transform 0.2s;
+}
+
+.artifact-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+}
+
+.artifact-card.expanded .artifact-body {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.artifact-card.expanded .artifact-chevron {
+  transform: rotate(90deg);
+}
+
+.artifact-content {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--fg-muted);
+  font-family: var(--font);
+  border-top: 1px solid var(--border);
+}
+
+.artifact-empty {
+  padding: 4px 10px;
+  font-size: 10px;
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
 /* ── Status Bar ──────────────────────────────── */
 .chat-status-bar {
   font-size: 10px;
