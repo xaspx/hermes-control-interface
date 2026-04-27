@@ -100,8 +100,7 @@ function showApp() {
   updateUserMenu();
   navigate(state.page);
   startNotifPolling();
-  // Connect WebSocket for real-time events
-  wsClient.connect();
+  // Connect WebSocket for real-time events — add listeners BEFORE connect to avoid race
   wsClient.addEventListener('open', () => {
     state._wsConnected = true;
     updateWsConnectionUI(true);
@@ -110,6 +109,11 @@ function showApp() {
     state._wsConnected = false;
     updateWsConnectionUI(false);
   });
+  if (wsClient.connected) {
+    // Already connected (e.g. reconnect before showApp re-runs)
+    updateWsConnectionUI(true);
+  }
+  wsClient.connect();
   setupWsChatHandlers();
 }
 
@@ -1882,8 +1886,8 @@ function updateWsConnectionUI(connected) {
   // Find or create the connection indicator in chat header
   let indicator = document.getElementById('ws-conn-indicator');
   if (!indicator) {
-    // Create it — insert into chat-header-status area
-    const header = document.getElementById('chat-header-status');
+    // Create it — insert into chat-header-right area
+    const header = document.getElementById('chat-header-right');
     if (header) {
       indicator = document.createElement('span');
       indicator.id = 'ws-conn-indicator';
@@ -1910,21 +1914,8 @@ function updateWsConnectionUI(connected) {
 function playChatComplete() {
   if (!state._soundEnabled) return;
   if (!state._soundEl) {
-    // Create a simple beep using Web Audio API
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      // Ascending double-beep: C5 (523Hz) then C6 (1047Hz)
-      for (let i = 0; i < data.length; i++) {
-        const t = i / ctx.sampleRate;
-        const freq1 = 523, freq2 = 1047;
-        const beepDur = 0.06;
-        const fade = Math.min(i, data.length - i) / (ctx.sampleRate * 0.015);
-        data[i] = (t < beepDur ? Math.sin(2 * Math.PI * freq1 * t) * fade :
-                  t < beepDur * 2 ? 0 : Math.sin(2 * Math.PI * freq2 * (t - beepDur * 2)) * 0.6 * fade) * 0.25;
-      }
-      state._soundEl = ctx;
+      state._soundEl = new (window.AudioContext || window.webkitAudioContext)();
       state._soundReady = true;
     } catch (e) {
       console.warn('[Chat] AudioContext not available:', e);
@@ -1957,7 +1948,6 @@ function toggleChatSound() {
   state._soundEnabled = !state._soundEnabled;
   const btn = document.getElementById('chat-sound-btn');
   if (btn) btn.textContent = state._soundEnabled ? '🔔' : '🔕';
-  // Init AudioContext on first enable (must be from user gesture)
   if (state._soundEnabled && !state._soundEl) {
     try {
       state._soundEl = new (window.AudioContext || window.webkitAudioContext)();
@@ -1972,7 +1962,7 @@ function updateToolCountUI() {
   const count = state._wsToolCount || 0;
   let indicator = document.getElementById('tool-count-indicator');
   if (!indicator) {
-    const header = document.getElementById('chat-header-status');
+    const header = document.getElementById('chat-header-right');
     if (header) {
       indicator = document.createElement('span');
       indicator.id = 'tool-count-indicator';
