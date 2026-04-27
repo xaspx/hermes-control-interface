@@ -2689,7 +2689,7 @@ async function loadSessionStats(name) {
 }
 
 async function resumeSession(sessionId) {
-  const agent = state.currentAgent || 'david';
+  const agent = state.currentAgent || state._defaultProfile || 'default';
   const cmd = `hermes -p ${agent} -r ${sessionId}`;
   openTerminalPanel(`Resume: ${sessionId}`, cmd);
 }

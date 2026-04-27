@@ -208,12 +208,22 @@ app.use(express.static(path.join(__dirname, 'dist'), {
   maxAge: '365d',
   immutable: true,
   setHeaders: (res, filePath) => {
-    // HTML files should not be cached aggressively (they reference hashed assets)
+    // HTML files should NEVER be cached (they reference hashed assets)
     if (filePath.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
     }
   },
 }));
+
+// API responses should NEVER be cached
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
 app.use('/vendor/xterm', express.static(path.join(__dirname, 'node_modules/@xterm/xterm'), { maxAge: '30d' }));
 app.use('/vendor/xterm-addon-fit', express.static(path.join(__dirname, 'node_modules/@xterm/addon-fit'), { maxAge: '30d' }));
 
@@ -1745,7 +1755,7 @@ app.post('/api/auth/login', loginRateLimiter, (req, res) => {
 });
 
 // Logout
-app.post('/api/auth/logout', requireAuth, (req, res) => {
+app.post('/api/auth/logout', requireAuth, requireCsrf, (req, res) => {
   const user = getCurrentUser(req);
   const cookies = parseCookies(req);
   const token = cookies[AUTH_COOKIE];
@@ -1848,19 +1858,19 @@ app.get('/api/notifications', requireAuth, (req, res) => {
 });
 
 // Support both /api/notifications/:id/dismiss (URL param) and /api/notifications/dismiss (body id)
-app.post('/api/notifications/:id/dismiss', requireAuth, (req, res) => {
+app.post('/api/notifications/:id/dismiss', requireAuth, requireCsrf, (req, res) => {
   const id = req.params.id || req.body?.id;
   if (id) dismissNotification(id);
   res.json({ ok: true });
 });
 
-app.post('/api/notifications/dismiss', requireAuth, (req, res) => {
+app.post('/api/notifications/dismiss', requireAuth, requireCsrf, (req, res) => {
   const id = req.body?.id;
   if (id) dismissNotification(id);
   res.json({ ok: true });
 });
 
-app.post('/api/notifications/clear', requireAuth, (req, res) => {
+app.post('/api/notifications/clear', requireAuth, requireCsrf, (req, res) => {
   clearNotifications();
   res.json({ ok: true });
 });
@@ -2029,8 +2039,10 @@ async function getProfiles() {
   const now = Date.now();
   if (getProfiles.cache && now - getProfiles.cache.at < 15_000) return getProfiles.cache.data;
   const raw = await shell('hermes profile list');
+  console.log('[DEBUG getProfiles] raw shell output:', JSON.stringify(raw));
   if (raw) {
     const data = parseHermesProfileList(raw);
+    console.log('[DEBUG getProfiles] parsed:', JSON.stringify(data));
     getProfiles.cache = { at: now, data };
     return data;
   }
@@ -2041,6 +2053,7 @@ getProfiles.cache = { at: 0, data: [] };
 
 app.get('/api/profiles', requireAuth, async (req, res) => {
   const profiles = await getProfiles();
+  console.log('[DEBUG /api/profiles] returning:', JSON.stringify(profiles));
   res.json({ ok: true, profiles });
 });
 
@@ -2048,7 +2061,7 @@ app.post('/api/profiles/use', requireRole('admin'), requireCsrf, async (req, res
   const name = sanitizeProfileName(req.body?.profile);
   if (!name) return res.status(400).json({ error: 'invalid profile name (allowed: a-z, A-Z, 0-9, _, -)' });
   try {
-    const result = await shell(`hermes profile use ${name}`, '10s');
+    const result = await execHermes(['profile', 'use', name], 10000);
     // Invalidate profiles cache so next fetch shows updated active profile
     getProfiles.cache = { at: 0, data: [] };
     res.json({ ok: true, profile: name, output: result.trim() });
@@ -3352,7 +3365,7 @@ app.get('/api/memory/:profile', requireAuth, async (req, res) => {
 app.get('/api/skills/browse/:page', requireAuth, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.params.page) || 1);
-    const output = await shell(`hermes skills browse --page ${page} 2>&1`, '15s');
+    const output = await execHermes(['skills', 'browse', '--page', String(page)], 15000);
     res.json({ ok: true, output, page });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -3405,8 +3418,8 @@ app.get('/api/skills/list/:profile', requireAuth, async (req, res) => {
   try {
     const profile = sanitizeProfileName(req.params.profile);
     if (!profile) return res.status(400).json({ ok: false, error: 'invalid profile name' });
-    const flag = profile === 'default' ? '' : ` --profile ${profile}`;
-    const output = await shell(`hermes${flag} skills list 2>&1`, '15s');
+    const profArg = profile === 'default' ? [] : ['-p', profile];
+    const output = await execHermes([...profArg, 'skills', 'list'], 15000);
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -3418,6 +3431,7 @@ app.post('/api/skills/install', requireRole('admin'), requireCsrf, async (req, r
   try {
     const { skill, profile } = req.body || {};
     if (!skill) return res.status(400).json({ ok: false, error: 'skill name required' });
+    if (!/^[\w.\-]+$/.test(skill)) return res.status(400).json({ ok: false, error: 'invalid skill name' });
     const profArg = profile ? ['-p', sanitizeProfileName(profile)] : [];
     const output = await execHermes([...profArg, 'skills', 'install', skill, '--yes'], 30000);
     const success = !output.includes('error') && !output.includes('Error');
@@ -3457,11 +3471,11 @@ app.post('/api/skills/update', requireRole('admin'), requireCsrf, async (req, re
 });
 
 // Skills check updates
-app.post('/api/skills/check', requireAuth, async (req, res) => {
+app.post('/api/skills/check', requireAuth, requireCsrf, async (req, res) => {
   try {
     const { profile } = req.body || {};
-    const flag = profile ? `-p ${sanitizeProfileName(profile)} ` : '';
-    const output = await shell(`hermes ${flag}skills check 2>&1`, '30s');
+    const profArg = profile ? ['-p', sanitizeProfileName(profile)] : [];
+    const output = await execHermes([...profArg, 'skills', 'check'], 30000);
     // Parse table output
     const lines = output.split('\n');
     const updates = [];
@@ -3613,8 +3627,13 @@ app.post('/api/backup/import', requireRole('admin'), requireCsrf, (req, res) => 
 });
 
 app.get('/api/backup/download', requireRole('admin'), (req, res) => {
-  const filePath = req.query.path;
-  if (!filePath || !filePath.endsWith('.zip') || filePath.includes('..')) {
+  const rawPath = req.query.path;
+  if (!rawPath || !rawPath.endsWith('.zip')) {
+    return res.status(400).json({ error: 'Invalid path' });
+  }
+  const filePath = path.resolve(rawPath);
+  // Backups are always created in /tmp/ — reject anything outside
+  if (!filePath.startsWith('/tmp/')) {
     return res.status(400).json({ error: 'Invalid path' });
   }
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
@@ -3724,9 +3743,9 @@ app.get('/api/sessions/:id/export', requireAuth, async (req, res) => {
     const sessionId = sanitizeSessionId(req.params.id);
     if (!sessionId) return res.status(400).json({ ok: false, error: 'invalid session id' });
     const tmpFile = `/tmp/session-${crypto.randomUUID()}.jsonl`;
-    const output = await shell(`hermes sessions export ${tmpFile} --session-id ${sessionId} 2>&1`);
-    const data = await shell(`cat ${tmpFile} 2>/dev/null`);
-    await shell(`rm -f ${tmpFile}`);
+    const output = await execHermes(['sessions', 'export', tmpFile, '--session-id', sessionId]);
+    const data = await fs.promises.readFile(tmpFile, 'utf8').catch(() => output);
+    await fs.promises.unlink(tmpFile).catch(() => {});
     res.json({ ok: true, data: data || output });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -4249,7 +4268,7 @@ app.get('/api/insights/:profile/:days', requireAuth, requirePerm('usage.view'), 
     const profile = sanitizeProfileName(req.params.profile);
     if (!profile) return res.status(400).json({ ok: false, error: 'invalid profile name' });
     const days = Math.min(parseInt(req.params.days || '7', 10), 90);
-    const output = await shell(`hermes --profile ${profile} insights --days ${days} 2>&1`, '60s');
+    const output = await execHermes(['--profile', profile, 'insights', '--days', String(days)], 60000);
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -4309,6 +4328,8 @@ app.post('/api/hermes-cron/:profile/create', requireCsrf, async (req, res) => {
     if (!profile) return res.status(400).json({ ok: false, error: 'invalid profile name' });
     const { schedule, prompt, name, deliver, repeat } = req.body || {};
     if (!schedule) return res.status(400).json({ ok: false, error: 'schedule required' });
+    if (prompt && (typeof prompt !== 'string' || prompt.length > 10000)) return res.status(400).json({ ok: false, error: 'invalid prompt (max 10000 chars)' });
+    if (name && (typeof name !== 'string' || name.length > 128 || !/^[\w\s.\-:]+$/.test(name))) return res.status(400).json({ ok: false, error: 'invalid name (allowed: a-z, A-Z, 0-9, spaces, . - :, max 128 chars)' });
     const args = ['-p', profile, 'cron', 'create'];
     if (name) args.push('--name', name);
     if (deliver) args.push('--deliver', deliver);
@@ -4607,6 +4628,7 @@ wss.on('connection', async (socket, req) => {
       }
       // ── Chat via WebSocket (TUI Gateway) ──
       if (msg.type === 'chat.start' && socket.authed) {
+        console.log(`[WS] chat.start received profile="${msg.profile || 'default'}" session_id="${msg.session_id || 'null'}"`);
         const bridge = getBridge(msg.profile || 'default');
         if (!bridge.proc) {
           let startErr = null;
