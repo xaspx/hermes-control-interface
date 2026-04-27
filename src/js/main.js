@@ -1507,7 +1507,9 @@ function ensureThinkingPanel(messagesDiv) {
     panel.innerHTML = '<div class="thinking-header">💭 Thinking</div><div class="thinking-text"></div>';
     // Insert before the streaming message or at the end
     const streamEl = document.getElementById('chat-streaming');
-    if (streamEl && streamEl.parentElement === messagesDiv) {
+    // Guard: streamEl might have been removed/replaced by reloadCurrentSessionMessages
+    // between check and insert. Use contains() for safety.
+    if (streamEl && messagesDiv.contains(streamEl)) {
       messagesDiv.insertBefore(panel, streamEl);
     } else {
       messagesDiv.appendChild(panel);
@@ -1828,12 +1830,38 @@ function renderChatContent(text) {
   });
 
   // ── 5. Lists (process after code blocks restored) ──
-  // Unordered lists
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>');
-  html = html.replace(/<\/ul>\s*<ul>/g, '');
-  // Ordered lists
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  // Collect ALL list items first, then wrap adjacent ones in <ul>/<ol>
+  const listReplacements = [];
+  // Unordered: capture individual - items (non-greedy, won't eat across items)
+  html = html.replace(/^- ([\s\S]*?)$/gm, (_, content) => {
+    const id = listReplacements.length;
+    listReplacements.push({ type: 'ul', content, id });
+    return `\x00LISTITEM${id}\x00`;
+  });
+  // Ordered: capture individual 1. items
+  html = html.replace(/^\d+\. ([\s\S]*?)$/gm, (_, content) => {
+    const id = listReplacements.length;
+    listReplacements.push({ type: 'ol', content, id });
+    return `\x00LISTITEM${id}\x00`;
+  });
+  // Group consecutive same-type list items
+  const grouped = [];
+  for (const item of listReplacements) {
+    const last = grouped[grouped.length - 1];
+    if (last && last.type === item.type) {
+      last.items.push(item.content);
+    } else {
+      grouped.push({ type: item.type, items: [item.content] });
+    }
+  }
+  // Restore as <ul>/<ol>
+  grouped.forEach((g, gi) => {
+    const items = g.items.map((c, i) => `<li>${c}</li>`).join('');
+    const tag = `<${g.type}>${items}</${g.type}>`;
+    html = html.replace(`\x00LISTITEM${gi}\x00`, tag);
+  });
+  // Clean up any stray unreplaced list placeholders (shouldn't happen)
+  html = html.replace(/\x00LISTITEM\d+\x00/g, '');
 
   // ── 6. Paragraphs ──
   // Split on double newlines, wrap each chunk in <p>
