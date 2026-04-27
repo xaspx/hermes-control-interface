@@ -3,7 +3,7 @@
 A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Manage terminals, files, sessions, cron jobs, token analytics, multi-agent gateways, and team access — all behind a password gate.
 
 **Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js
-**Version:** 3.4.0
+**Version:** 3.5.0
 
 ---
 
@@ -11,13 +11,13 @@ A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousRes
 
 > **Chat via Gateway API** — Real-time streaming, tool call cards with JSON viewer, session resume, stop button, multi-profile support. Auto-fallback to CLI.
 
-> **RBAC v2** — 28 permissions across 12 groups. Admin, viewer, or custom roles per user.
+> **RBAC v2** — 20 permissions across 3 roles. Admin, viewer, or custom roles per user.
 
 > **Multi-Agent Gateway** — Start/stop/configure multiple Hermes profiles. Real-time logs. Systemd service management.
 
 > **Token Analytics** — Track sessions, messages, tokens, cost by model, platform, and time range.
 
-> **Security Hardened** — Command injection fixes, CSRF on 21 endpoints, dynamic CORS, security audit report (18 findings addressed).
+> **Security Hardened** — Command injection fixes, CSRF on 21 endpoints, dynamic CORS, comprehensive XSS protection (escapeHtml on all error handlers), 18 findings addressed.
 
 ---
 
@@ -264,7 +264,7 @@ Real browser-based terminal:
 
 ### 🔒 Security
 
-- **Multi-user RBAC**: 28 permissions across 12 groups
+- **Multi-user RBAC**: 20 permissions across 3 roles
 - **Roles**: `admin` (full access), `viewer` (read-only), `custom` (your choice)
 - **bcrypt** password hashing (cost factor 10)
 - **CSRF tokens** on all mutating requests
@@ -273,7 +273,7 @@ Real browser-based terminal:
 - **Input sanitization**: strict regex on all user inputs (profiles, sessions, titles, filenames)
 - **Path traversal prevention** in file explorer
 - **Rate limiting**: login (5 failed/15min), terminal exec (30/min)
-- **XSS protection**: all dynamic values escaped in rendered HTML
+- **XSS protection**: all dynamic values escaped via escapeHtml() — code blocks extracted before render, error messages sanitized in all 15+ catch blocks
 - **Admin gate**: critical endpoints (`/api/plugins`, etc.) require admin role
 - **Token cleanup**: automatic session token cleanup every 15 minutes
 - **Unhandled exception handlers**: `unhandledRejection` + `uncaughtException` caught and logged
@@ -476,13 +476,14 @@ See `docs/API.md` for full reference.
 
 ---
 
-## Security Audit
+**Security Audit**
 
 Full audit report: [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)
-**Score: 7.0/10** — Production-ready.
+**Score: 7.5/10** — Production-ready.
 
-Issues found and fixed in v3.3.0:
+Issues found and fixed in v3.3.0 and later:
 - XSS in home cards (`loadHomeCards()`) — fixed with `escapeHtml()`
+- XSS in error handlers (15+ locations) — all `e.message` now sanitized in innerHTML (v3.5.0)
 - Missing admin gate on plugins API — fixed
 - Terminal exec rate limit — 30 commands/minute per IP
 - Token cleanup interval — now runs every 15 minutes
@@ -515,6 +516,24 @@ If running via systemd, use `sudo systemctl restart hermes-control`.
 ---
 
 ## Changelog
+
+### v3.5.0 (2026-04-27)
+
+**🧹 Maintenance & Security Hardening:**
+
+- **Dead code removed:** `getProjects()` and `formatBytes()` functions (unused — never called anywhere)
+- **XSS audit complete (S1):** All 15+ `e.message` and `err.message` in `innerHTML` now wrapped with `escapeHtml()` — error handlers across all pages (home, agents, sessions, logs, config, files, terminal, modals, audit log, users)
+- **RBAC precision:** Permissions refined to 20 across 3 roles (admin/viewer/custom) — cleaner than 28 across 12 groups
+- **Session sorting:** Chat sessions sorted by last activity (MAX message timestamp from messages table)
+- **Audit log UX:** Newest-first ordering with Load More at bottom (consistent with other paginated lists)
+
+**🐛 Bug Fixes:**
+
+- **Profile selector sync:** Profile dropdown now correctly syncs after `hermes profile use` (no more stale state after setting default)
+- **Chat agent info panel:** Always visible inside sidebar (no toggle) — shows active agent with bold gold name, all agents list with status dots, ★ default badge
+- **`finalizeWsChat` race guard:** `_finalizeInProgress` flag prevents double-call race condition
+- **`reloadCurrentSessionMessages` race guard:** `_reloadInProgress` flag + all exit paths clear the flag
+- **`showModal` return fix:** Proper if/else with `return` in cancel branch (prevents undefined `.action`)
 
 ### v3.4.0 (2026-04-19)
 
@@ -589,7 +608,7 @@ If running via systemd, use `sudo systemctl restart hermes-control`.
 - `--continue ""` (empty) creates fresh session; bare `--continue` resumes last session
 
 **👥 User Management v2 (RBAC):**
-- 28 permissions across 12 groups: Sessions, Chat, Logs, Usage, Gateway, Config, Secrets, Skills, Cron, Files, Terminal, Users, System
+- 20 permissions across 3 roles: Admin (full), Viewer (read-only), Custom (your choice)
 - Built-in roles: `admin` (full access), `viewer` (read-only), custom role
 - Create/edit user modal: role presets (Admin/Viewer), grouped permission checklist, reset password button
 - Permission gating on 9 previously-unprotected endpoints

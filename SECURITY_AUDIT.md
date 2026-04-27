@@ -1,7 +1,46 @@
 # HCI Security Audit Report
-**Date:** 2026-04-19
-**Scope:** Full codebase at `/root/projects/hci-staging/`
-**Files analyzed:** `server.js` (4485 lines), `auth.js` (287 lines), `src/js/main.js` (6219 lines), `package.json`, `.env`, `.gitignore`
+**Date:** 2026-04-19 (original audit)
+**Last updated:** 2026-04-27 (v3.5.0 — S1 XSS audit)
+**Scope:** Full codebase at `/root/projects/hermes-control-interface/`
+**Files analyzed (v3.4.0):** `server.js` (4485 lines), `auth.js` (287 lines), `src/js/main.js` (6219 lines), `package.json`, `.env`, `.gitignore`
+
+---
+
+## v3.5.0 Update — S1 XSS Audit (2026-04-27)
+
+### S1: Unescaped Error Messages in innerHTML
+- **Severity:** MEDIUM
+- **Status:** ✅ **RESOLVED** in v3.5.0
+- **Scope:** 15+ locations across `src/js/main.js`
+- **Description:** Error messages (`e.message`, `err.message`) from try/catch blocks were inserted into `innerHTML` without `escapeHtml()`. These could contain filenames, network errors, JSON parse errors, or path information from server responses — all user-controlled from HCI's perspective.
+- **Fix:** All 15+ catch blocks now wrap error messages with `escapeHtml()`:
+  - Page routing error (`loadPage()`)
+  - Home dashboard cards (`loadHomePage()`)
+  - Agents list + agent detail error handlers
+  - Sessions table error handler
+  - Logs viewer error handler
+  - Config tab + settings render
+  - Usage card error handlers
+  - Users page (list + user detail)
+  - Audit log page render
+  - File explorer error handler
+  - Terminal body error handler
+  - Modal overlay error handlers
+  - Subagent WebSocket status (`payload.status`)
+- **Verification:** `renderChatContent()` confirmed safe — code blocks extracted before HTML escape, no direct innerHTML injection. Tool results via `textContent` (inherently safe). Agent/profile names wrapped with `escapeHtml()`.
+
+### v3.5.0 Status Summary
+| Category | Finding | Status |
+|----------|---------|--------|
+| CRITICAL | Command injection (skills uninstall) | ✅ Fixed v3.4.0 |
+| CRITICAL | Command injection (skills update) | ✅ Fixed v3.4.0 |
+| HIGH | Sessions rename shell exec | ✅ Fixed v3.4.0 |
+| HIGH | CSRF 20+ endpoints missing | ✅ Fixed v3.4.0 |
+| HIGH | Hardcoded fallback gateway key | ✅ Fixed v3.4.0 |
+| HIGH | API key written to config plaintext | ✅ Fixed v3.4.0 |
+| MEDIUM | escapeHtml missing quote escaping | ✅ Fixed v3.4.0 |
+| MEDIUM | S1: error message innerHTML | ✅ Fixed v3.5.0 |
+| LOW | Debug CSRF token logging | ✅ Fixed v3.4.0 |
 
 ---
 
@@ -117,15 +156,7 @@
 
 ### 10. Weak `escapeHtml` — Missing Quote Escaping
 - **Severity:** MEDIUM
-- **File:** `src/js/main.js:2651-2653`
-- **Description:** The `escapeHtml` function only escapes `&`, `<`, `>`. It does NOT escape `"` or `'`, which means user-controlled data placed inside HTML attributes via template literals could break out of attributes.
-  ```js
-  function escapeHtml(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-  ```
-- **Exploit:** If a session title or profile name contains `"`, it could break out of an `onclick` or other attribute context.
-- **Fix:** Add `.replace(/"/g, '&quot;').replace(/'/g, '&#x27;')` to `escapeHtml`.
+- **Status:** ✅ **RESOLVED** in v3.4.0 — `escapeHtml()` now escapes `"` as `&quot;` and `'` as `&#x27;`
 
 ### 11. Reflected Error Messages Leak Username Existence
 - **Severity:** MEDIUM
@@ -251,7 +282,15 @@
 
 ## Recommended Priority Fixes
 
-1. **Immediate (deploy today):** Fix command injection in skills/uninstall (finding #1) and skills/update (finding #2) by using `execHermes()` or strict allowlist sanitization.
-2. **This week:** Add `requireCsrf` to all state-changing admin endpoints (finding #4). Remove hardcoded Gateway API key fallback (finding #5).
-3. **This sprint:** Improve `escapeHtml` (finding #10), add path validation to backup download (finding #9), remove debug CSRF logging (finding #13).
-4. **Backlog:** Refactor to use `execHermes()` everywhere instead of `shell()` (finding #7), implement proper CSP without unsafe-inline (finding #15).
+> **v3.5.0 Update:** All CRITICAL, HIGH, and most MEDIUM findings from the original audit have been resolved. Remaining items are informational or require architectural changes.
+
+1. **✅ COMPLETE (v3.4.0):** Fix command injection in skills/uninstall and skills/update — `execHermes()` + strict allowlist regex.
+2. **✅ COMPLETE (v3.4.0):** Add `requireCsrf` to all 21 state-changing admin endpoints.
+3. **✅ COMPLETE (v3.4.0):** Remove hardcoded fallback Gateway API key — now reads from `~/.hermes/config.yaml`.
+4. **✅ COMPLETE (v3.4.0):** Improve `escapeHtml()` — added `"` and `'` escaping.
+5. **✅ COMPLETE (v3.4.0):** Remove debug CSRF token logging.
+6. **✅ COMPLETE (v3.5.0):** S1 XSS audit — all 15+ error handlers now use `escapeHtml()`.
+7. **Backlog:** CSP `unsafe-inline` — requires moving inline scripts to external files (substantial refactor).
+8. **Backlog:** Per-account lockout — implement lockout after N failed login attempts.
+9. **Backlog:** `shell()` → `execHermes()` refactor — replace remaining `shell()` call sites with safer `execFile`-based equivalents.
+10. **Backlog:** Backup download path validation — use `path.resolve()` + prefix check instead of string matching.

@@ -8,7 +8,7 @@ Base URL: `http://localhost:10272` (or your domain if behind a reverse-proxy)
 
 All endpoints marked **Auth required** require a valid session cookie (`hermes...auth`).
 
-Login first via `POST /api/login` to receive the cookie.
+Login first via `POST /api/auth/login` to receive the cookie.
 
 Internal endpoints (marked **Internal**) require the `x-hermes-control-secret` header matching `HERMES_CONTROL_SECRET` instead of a cookie.
 
@@ -33,7 +33,7 @@ Returns a basic health check.
 
 ---
 
-### `GET /api/session`
+### `GET /api/auth/status`
 
 **Auth required:** No
 
@@ -49,7 +49,7 @@ Returns the current authentication state.
 
 ---
 
-### `POST /api/login`
+### `POST /api/auth/login`
 
 **Auth required:** No
 
@@ -57,7 +57,7 @@ Returns the current authentication state.
 
 **Request body:**
 ```json
-{ "password": "your-password" }
+{ "password": "***" }
 ```
 
 **Success response (200):**
@@ -81,7 +81,7 @@ Sets the `hermes...auth` cookie.
 
 ---
 
-### `POST /api/logout`
+### `POST /api/auth/logout`
 
 **Auth required:** No (but does nothing if not authenticated)
 
@@ -188,37 +188,6 @@ Returns journal logs for a gateway service.
   "profile": "david",
   "service": "hermes-gateway-david",
   "logs": "Apr 10 23:00:00 vm1 systemd[1]: Started Hermes Gateway - david..."
-}
-```
-
----
-
-### `GET /api/dashboard-state`
-
-**Auth required:** Yes
-
-Returns the full dashboard snapshot including system metrics, events, sessions, and cron jobs.
-
-```json
-{
-  "ok": true,
-  "identity": "root@hermes",
-  "uptime": 3600,
-  "hostname": "vm1",
-  "platform": "linux",
-  "nodeVersion": "v24.14.1",
-  "memUsed": "842 MB",
-  "memTotal": "1.96 GB",
-  "cpuCores": 2,
-  "loadAvg": [0.12, 0.08, 0.05],
-  "diskUsed": "38 GB",
-  "diskTotal": "49 GB",
-  "events": [...],
-  "hermesSessions": [...],
-  "cronJobs": [...],
-  "eventsConnected": true,
-  "terminalReady": true,
-  "layout": {...}
 }
 ```
 

@@ -2,11 +2,11 @@
 
 ## Authentication
 
-**Password storage:** Plaintext comparison against the value in `HERMES_CONTROL_PASSWORD`. The password itself is never stored — only the live environment variable. Use a long, random value in production.
+**Password storage:** bcrypt hashing with cost factor 10. The password itself is never stored in plaintext — only the bcrypt hash in the auth database.
 
-**Password comparison:** Uses `crypto.timingSafeEqual` to prevent timing oracle attacks. This eliminates timing side-channels in the comparison itself.
+**Password comparison:** `bcrypt.compare()` — constant-time comparison, resistant to timing oracle attacks. No plaintext comparison ever occurs.
 
-**Auth tokens:** HMAC-SHA256 signed tokens stored in an HttpOnly cookie. Tokens contain a Unix timestamp and are valid for 24 hours. The signature prevents tampering or forgery.
+**Auth tokens:** Session cookie (`hermes...auth`) — HttpOnly, SameSite=Lax, optional Secure flag. No JWT or bearer tokens. Sessions are validated server-side on each request.
 
 **Rate limiting:** IPs are blocked from authenticating after 5 failed attempts within a 15-minute window. This does not prevent brute-force attacks entirely but significantly raises the cost.
 
@@ -54,10 +54,10 @@ The server makes no outbound HTTP requests. It only:
 The `/ws` endpoint requires an authenticated session cookie. Unauthenticated WebSocket connections receive no data.
 
 ## Security Audit Status
-
-- **Multi-user via RBAC v2.** 28 permissions, admin/viewer/custom roles.
-- **CSRF protection** on all state-changing admin endpoints.
+- **Multi-user via RBAC v2.** 20 permissions, admin/viewer/custom roles.
+- **CSRF protection** on all state-changing admin endpoints (21 endpoints protected).
 - **Security audit completed** (2026-04-19): 18 findings addressed — see `SECURITY_AUDIT.md` for full report.
+- **XSS audit completed** (2026-04-27): Comprehensive `escapeHtml()` audit — all 15+ error handlers fixed, code-first escape pattern verified in `renderChatContent()`.
 - **Command injection hardened:** All shell execution points use `execHermes()` (no shell interpretation) or strict input validation.
 
 ## Recommendations for Production
