@@ -455,3 +455,103 @@
   #main { padding: 0 12px 12px; }
   .user-role { display: none; }
 }
+
+/* ============================================
+   System Monitor Page
+   ============================================ */
+.mon-overview {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+}
+
+.mon-overview-inner {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.mon-ov-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 60px;
+}
+
+.mon-ov-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+
+.mon-ov-val {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.mon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.mon-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  transition: border-color var(--transition);
+}
+
+.mon-card:hover {
+  border-color: var(--border-strong);
+}
+
+.mon-card-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin-bottom: 12px;
+}
+
+.mon-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mon-big-val {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--fg);
+  line-height: 1.1;
+}
+
+.mon-sub {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-top: 2px;
+}
+
+.mon-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mon-stat-label {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.mon-stat-val {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+}

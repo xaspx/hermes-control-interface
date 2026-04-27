@@ -105,16 +105,24 @@ function showApp() {
   // Restore last session from localStorage after sidebar loads
   const lastSid = localStorage.getItem('hci-last-session');
   if (lastSid && state.page === 'chat') {
-    // Defer until sidebar sessions are loaded
-    setTimeout(() => {
+    // Poll until sessions are loaded in DOM
+    let attempts = 0;
+    const tryRestore = () => {
+      attempts++;
       const exists = document.querySelector(`.chat-session-item[data-sid="${lastSid}"]`);
-      if (exists) loadChatSession(lastSid);
-      else localStorage.removeItem('hci-last-session');
-    }, 800);
+      if (exists) {
+        loadChatSession(lastSid);
+      } else if (attempts < 10) {
+        setTimeout(tryRestore, 400);
+      } else {
+        localStorage.removeItem('hci-last-session');
+      }
+    };
+    setTimeout(tryRestore, 300);
   }
 
-  // Phase 3: init gateway health badge
-  if (state.page === 'chat') updateGatewayBadge().catch(() => {});
+  // Phase 3: init gateway health badge (defer until DOM renders)
+  if (state.page === 'chat') setTimeout(() => updateGatewayBadge().catch(() => {}), 100);
   // Connect WebSocket for real-time events — add listeners BEFORE connect to avoid race
   wsClient.addEventListener('open', () => {
     state._wsConnected = true;
@@ -274,6 +282,9 @@ async function loadPage(page, params = {}) {
         break;
       case 'logs':
         await loadLogs(container);
+        break;
+      case 'mon':
+        await loadMonitoring(container);
         break;
       default:
         container.innerHTML = `<div class="empty">Page not found</div>`;
@@ -6161,6 +6172,166 @@ async function loadLogs(container) {
   }
 
   refreshLogs();
+}
+
+// ============================================
+// Monitoring Page
+// ============================================
+async function loadMonitoring(container) {
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">System Monitor</div>
+        <div class="page-subtitle">Real-time system resource metrics</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="loadMonitoring(document.querySelector('.page.active'))">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Key metrics bar -->
+    <div id="mon-overview" class="mon-overview" style="margin-top:12px;">
+      <div class="loading">Loading metrics…</div>
+    </div>
+
+    <!-- Metrics grid -->
+    <div id="mon-grid" class="mon-grid" style="margin-top:16px;">
+      <div class="mon-card" id="mon-cpu">
+        <div class="mon-card-title">CPU Usage</div>
+        <div class="mon-card-body">
+          <div class="mon-big-val" id="mon-cpu-val">—</div>
+          <div class="mon-sub" id="mon-cpu-sub">%</div>
+        </div>
+      </div>
+      <div class="mon-card" id="mon-mem">
+        <div class="mon-card-title">Memory</div>
+        <div class="mon-card-body">
+          <div class="mon-big-val" id="mon-mem-val">—</div>
+          <div class="mon-sub" id="mon-mem-sub">MB</div>
+        </div>
+      </div>
+      <div class="mon-card" id="mon-disk">
+        <div class="mon-card-title">Disk</div>
+        <div class="mon-card-body">
+          <div class="mon-big-val" id="mon-disk-val">—</div>
+          <div class="mon-sub" id="mon-disk-sub"></div>
+        </div>
+      </div>
+      <div class="mon-card" id="mon-procs">
+        <div class="mon-card-title">Processes</div>
+        <div class="mon-card-body">
+          <div class="mon-big-val" id="mon-procs-val">—</div>
+          <div class="mon-sub">running</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Secondary metrics -->
+    <div id="mon-secondary" class="mon-grid" style="margin-top:16px;">
+      <div class="mon-card" id="mon-load">
+        <div class="mon-card-title">Load Average</div>
+        <div class="mon-card-body" style="display:flex;gap:16px;align-items:baseline;">
+          <div><div class="mon-big-val" style="font-size:16px;" id="mon-load1">—</div><div class="mon-sub" style="font-size:10px;">1m</div></div>
+          <div><div class="mon-big-val" style="font-size:16px;" id="mon-load5">—</div><div class="mon-sub" style="font-size:10px;">5m</div></div>
+          <div><div class="mon-big-val" style="font-size:16px;" id="mon-load15">—</div><div class="mon-sub" style="font-size:10px;">15m</div></div>
+        </div>
+      </div>
+      <div class="mon-card" id="mon-net">
+        <div class="mon-card-title">Network I/O</div>
+        <div class="mon-card-body" style="display:flex;flex-direction:column;gap:4px;">
+          <div class="mon-stat-row"><span class="mon-stat-label">Interface</span><span class="mon-stat-val" id="mon-net-iface">—</span></div>
+          <div class="mon-stat-row"><span class="mon-stat-label">Bytes</span><span class="mon-stat-val" id="mon-net-bytes">—</span></div>
+          <div class="mon-stat-row"><span class="mon-stat-label">Packets</span><span class="mon-stat-val" id="mon-net-packets">—</span></div>
+        </div>
+      </div>
+      <div class="mon-card" id="mon-node-mem">
+        <div class="mon-card-title">Node.js Memory</div>
+        <div class="mon-card-body" style="display:flex;flex-direction:column;gap:4px;">
+          <div class="mon-stat-row"><span class="mon-stat-label">RSS</span><span class="mon-stat-val" id="mon-node-rss">—</span></div>
+          <div class="mon-stat-row"><span class="mon-stat-label">Heap Used</span><span class="mon-stat-val" id="mon-node-heap">—</span></div>
+          <div class="mon-stat-row"><span class="mon-stat-label">Heap Total</span><span class="mon-stat-val" id="mon-node-heap-total">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- System info -->
+    <div id="mon-info" class="mon-grid" style="margin-top:16px;">
+      <div class="mon-card">
+        <div class="mon-card-title">Uptime</div>
+        <div class="mon-card-body">
+          <div class="mon-big-val" style="font-size:18px;" id="mon-uptime-val">—</div>
+        </div>
+      </div>
+      <div class="mon-card">
+        <div class="mon-card-title">Versions</div>
+        <div class="mon-card-body" style="display:flex;flex-direction:column;gap:4px;">
+          <div class="mon-stat-row"><span class="mon-stat-label">HCI</span><span class="mon-stat-val" id="mon-ver-hci">—</span></div>
+          <div class="mon-stat-row"><span class="mon-stat-label">Hermes</span><span class="mon-stat-val" id="mon-ver-hermes">—</span></div>
+          <div class="mon-stat-row"><span class="mon-stat-label">Node.js</span><span class="mon-stat-val" id="mon-ver-node">—</span></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Fetch and render metrics
+  await refreshMonitoring();
+
+  // Auto-refresh every 5 seconds
+  if (state._monInterval) clearInterval(state._monInterval);
+  state._monInterval = setInterval(() => refreshMonitoring(), 5000);
+}
+
+async function refreshMonitoring() {
+  try {
+    const r = await api('/api/monitoring');
+    if (!r.ok) {
+      document.getElementById('mon-overview').innerHTML = `<div class="error-msg">${r.error || 'Failed to load metrics'}</div>`;
+      return;
+    }
+
+    // Overview bar
+    document.getElementById('mon-overview').innerHTML = `
+      <div class="mon-overview-inner">
+        <div class="mon-ov-item"><span class="mon-ov-label">CPU</span><span class="mon-ov-val">${r.cpu || '—'}</span></div>
+        <div class="mon-ov-item"><span class="mon-ov-label">Memory</span><span class="mon-ov-val">${r.memory || '—'}</span></div>
+        <div class="mon-ov-item"><span class="mon-ov-label">Disk</span><span class="mon-ov-val">${r.disk || '—'}</span></div>
+        <div class="mon-ov-item"><span class="mon-ov-label">Processes</span><span class="mon-ov-val">${r.processes || 0}</span></div>
+        <div class="mon-ov-item"><span class="mon-ov-label">Load</span><span class="mon-ov-val">${r.load?.avg1 || '—'}, ${r.load?.avg5 || '—'}, ${r.load?.avg15 || '—'}</span></div>
+      </div>
+    `;
+
+    // Primary metrics
+    document.getElementById('mon-cpu-val').textContent = r.cpu?.replace('%', '') || '—';
+    document.getElementById('mon-mem-val').textContent = (r.memory || '—').split(' ')[0] || '—';
+    document.getElementById('mon-mem-sub').textContent = (r.memory || '').includes('MB') ? 'MB' : '';
+    document.getElementById('mon-disk-val').textContent = (r.disk || '—').split(' ')[0] || '—';
+    document.getElementById('mon-disk-sub').textContent = (r.disk || '—').split(' ').slice(1).join(' ') || '';
+    document.getElementById('mon-procs-val').textContent = r.processes || 0;
+
+    // Load averages
+    document.getElementById('mon-load1').textContent = r.load?.avg1 || '—';
+    document.getElementById('mon-load5').textContent = r.load?.avg5 || '—';
+    document.getElementById('mon-load15').textContent = r.load?.avg15 || '—';
+
+    // Network
+    document.getElementById('mon-net-iface').textContent = r.network?.interface || '—';
+    document.getElementById('mon-net-bytes').textContent = formatNumber(parseInt(r.network?.bytes) || 0);
+    document.getElementById('mon-net-packets').textContent = formatNumber(parseInt(r.network?.packets) || 0);
+
+    // Node.js memory
+    document.getElementById('mon-node-rss').textContent = r.node_memory?.rss_mb ? `${r.node_memory.rss_mb} MB` : '—';
+    document.getElementById('mon-node-heap').textContent = r.node_memory?.heap_used_mb ? `${r.node_memory.heap_used_mb} MB` : '—';
+    document.getElementById('mon-node-heap-total').textContent = r.node_memory?.heap_total_mb ? `${r.node_memory.heap_total_mb} MB` : '—';
+
+    // System info
+    document.getElementById('mon-uptime-val').textContent = r.uptime || '—';
+    document.getElementById('mon-ver-hci').textContent = r.hci_version || '—';
+    document.getElementById('mon-ver-hermes').textContent = r.hermes_version || '—';
+    document.getElementById('mon-ver-node').textContent = r.node_version || '—';
+
+  } catch (e) {
+    // Silent fail on refresh errors
+  }
 }
 
 async function refreshLogs() {

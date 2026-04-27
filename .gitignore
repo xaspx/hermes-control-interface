@@ -14,3 +14,6 @@ docs/BUSINESS_PLAN.md
 docs/ARCHITECTURE.md
 docs/SECURITY_AUDIT.md
 SECURITY-AUDIT.md
+
+# HCI config (per-deployment, contains secrets)
+hci.config.yaml

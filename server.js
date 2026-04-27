@@ -12,6 +12,7 @@ const { WebSocketServer } = require('ws');
 const rateLimit = require('express-rate-limit');
 const yaml = require('js-yaml');
 const Database = require('better-sqlite3');
+const { getConfig } = require('./lib/hci-config');
 const {
   mergeSessionsFromSources,
   parseHermesSessionsList,
@@ -107,12 +108,15 @@ function execHermes(args, timeout = 30000) {
   });
 }
 
-const PORT = Number(process.env.PORT || 10272);
-const CONTROL_PASSWORD = process.env.HERMES_CONTROL_PASSWORD;
-const CONTROL_SECRET = process.env.HERMES_CONTROL_SECRET;
-const AUTH_COOKIE = 'hermes_control_auth';
-const PROJECT_ROOT = __dirname;
-const PROJECTS_ROOT = process.env.HERMES_PROJECTS_ROOT || path.dirname(PROJECT_ROOT);
+// ── Load HCI config (hci.config.yaml + env overrides) ──
+const cfg = getConfig();
+
+const PORT            = cfg.port;
+const CONTROL_PASSWORD = cfg.password;
+const CONTROL_SECRET  = cfg.secret;
+const AUTH_COOKIE      = cfg.session.cookieName;
+const PROJECT_ROOT     = __dirname;
+const PROJECTS_ROOT    = cfg.projectsRoot;
 
 // Dynamic identity — works for root and non-root users
 const HCI_USER = os.userInfo().username;
@@ -133,48 +137,22 @@ if (!IS_ROOT && !process.env.XDG_RUNTIME_DIR) {
 
 
 // Cookie helper — conditionally adds Secure flag for HTTPS
-function setAuthCookie(res, token, maxAge = 86400) {
-  const secure = res.req?.secure || res.req?.get('X-Forwarded-Proto') === 'https';
+function setAuthCookie(res, token, maxAge = cfg.session.cookieMaxAge) {
+  const secure = cfg.session.secure !== null
+    ? cfg.session.secure
+    : res.req?.secure || res.req?.get('X-Forwarded-Proto') === 'https';
   res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secure ? '; Secure' : ''}`);
 }
 function clearAuthCookie(res) {
   res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
 }
-const CONTROL_HOME = process.env.HERMES_CONTROL_HOME || path.join(os.homedir(), '.hermes');
+const CONTROL_HOME = cfg.hermesHome;
 const CONTROL_STATE_DIR = path.join(CONTROL_HOME, 'control-interface');
 const AVATAR_OVERRIDE_PATH = path.join(CONTROL_STATE_DIR, 'avatar.dataurl');
 const STATE_DB_PATH = path.join(CONTROL_HOME, 'state.db');
 
-function parseExplorerRoots(raw) {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length) {
-      return parsed.map((item, index) => {
-        if (typeof item === 'string') {
-          return { key: `root-${index + 1}`, label: item, root: item };
-        }
-        if (item && typeof item === 'object' && item.root) {
-          return {
-            key: String(item.key || `root-${index + 1}`),
-            label: String(item.label || item.root),
-            root: String(item.root),
-          };
-        }
-        return null;
-      }).filter(Boolean);
-    }
-  } catch {}
-  return String(raw)
-    .split(',')
-    .map((part, index) => part.trim())
-    .filter(Boolean)
-    .map((root, index) => ({ key: `root-${index + 1}`, label: root, root }));
-}
-
-const ROOTS = parseExplorerRoots(process.env.HERMES_CONTROL_ROOTS) || [
-  { key: 'hermes', label: CONTROL_HOME, root: CONTROL_HOME },
-];
+// Explorer roots — already parsed by hci-config.js
+const ROOTS = cfg.roots;
 const IGNORED_DIRS = new Set([
   'node_modules', '.git', 'cache', 'document_cache', 'audio_cache', 'checkpoints', 'logs', 'tmp', '.next', '.turbo', '.cache',
 ]);
@@ -290,7 +268,8 @@ const events = [];
 // Sending a message uses --resume with the real hermes session ID
 
 // ── Gateway API Proxy (fast, structured events) ────────────────────
-const GATEWAY_API_KEY = process.env.GATEWAY_API_KEY || loadGatewayApiKey();
+// Gateway API key: explicit config → auto-discover from hermes config.yaml
+const GATEWAY_API_KEY = cfg.gatewayApiKey || loadGatewayApiKey();
 const HERMES_HOME = process.env.HERMES_HOME || path.join(os.homedir(), '.hermes');
 
 // Load gateway API key from default profile config.yaml
@@ -307,8 +286,10 @@ function loadGatewayApiKey() {
 }
 
 // Resolve CORS origins for gateway config injection
-// Priority: HCI_CORS_ORIGINS env var → auto-detect from request → sensible defaults
+// Priority: explicit config → HCI_CORS_ORIGINS env var → auto-detect from request
 function resolveCorsOrigins(req) {
+  // If loaded from config/env, use it directly (already comma-separated string)
+  if (cfg.corsOrigins) return cfg.corsOrigins;
   // If env var set, use it directly (comma-separated)
   if (process.env.HCI_CORS_ORIGINS) return process.env.HCI_CORS_ORIGINS;
   // Auto-detect from the incoming request origin
@@ -2059,6 +2040,80 @@ app.get('/api/system/health', requireAuth, async (req, res) => {
       node_version: process.version,
       agents: Math.max(0, parseInt(agents.trim()) - 2) || 0, // subtract header lines
       sessions: Math.max(0, parseInt(sessions.trim()) - 2) || 0,
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// System Monitoring — detailed metrics
+app.get('/api/monitoring', requireAuth, async (req, res) => {
+  try {
+    const [cpu, mem, disk, loadAvg, netio, processes, uptime, version] = await Promise.all([
+      shell("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"),
+      shell("free -m | awk '/Mem:/ {printf \"%d/%dMB (%.1f%%)\", $3, $2, $3/$2*100}'"),
+      shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
+      shell("cat /proc/loadavg | awk '{print $1\", \"$2\", \"$3}'"),
+      shell("cat /proc/net/dev | awk 'NR==3 {print $1, $9}'"),
+      shell("ps aux --no-headers | wc -l"),
+      shell("uptime | awk -F'up ' '{split($2,a,\" user\");print a[1]\", \"$3}'"),
+      shell("hermes version 2>&1 | head -1"),
+    ]);
+
+    // Parse network interface (skip loopback)
+    const netParts = (netio || 'lo 0').trim().split(/\s+/);
+    const netInterface = netParts[0] || 'eth0';
+    const netBytes = netParts[1] || '0';
+    const netPackets = netParts[2] || '0';
+
+    // CPU percentage (already in format like "12.5%")
+    const cpuPct = (cpu.trim() || 'N/A').replace(/,/g, '');
+
+    // Memory usage
+    const memInfo = mem.trim() || 'N/A';
+
+    // Disk usage
+    const diskInfo = disk.trim() || 'N/A';
+
+    // Load averages
+    const loadParts = (loadAvg.trim() || '0, 0, 0').split(',').map(l => l.trim());
+    const load1 = loadParts[0] || '0';
+    const load5 = loadParts[1] || '0';
+    const load15 = loadParts[2] || '0';
+
+    // Process count
+    const procCount = parseInt(processes.trim()) || 0;
+
+    // Uptime info
+    const upInfo = uptime.trim() || 'N/A';
+
+    // Hermes version
+    const hermesVer = version.trim() || 'N/A';
+    const hciVer = require('./package.json').version;
+
+    // Node.js memory usage (RSS, HeapUsed, HeapTotal)
+    const nodeMem = process.memoryUsage();
+    const nodeMemRSS = Math.round(nodeMem.rss / 1024 / 1024);
+    const nodeMemHeapUsed = Math.round(nodeMem.heapUsed / 1024 / 1024);
+    const nodeMemHeapTotal = Math.round(nodeMem.heapTotal / 1024 / 1024);
+
+    res.json({
+      ok: true,
+      cpu: cpuPct,
+      memory: memInfo,
+      disk: diskInfo,
+      load: { avg1: load1, avg5: load5, avg15: load15 },
+      network: { interface: netInterface, bytes: netBytes, packets: netPackets },
+      processes: procCount,
+      uptime: upInfo,
+      hermes_version: hermesVer,
+      hci_version: hciVer,
+      node_version: process.version,
+      node_memory: {
+        rss_mb: nodeMemRSS,
+        heap_used_mb: nodeMemHeapUsed,
+        heap_total_mb: nodeMemHeapTotal,
+      },
     });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -4538,8 +4593,8 @@ app.put('/api/hermes-cron/:profile/:jobId', requireCsrf, async (req, res) => {
 });
 
 const server = (() => {
-  const sslCert = process.env.HCI_SSL_CERT_FILE;
-  const sslKey = process.env.HCI_SSL_KEY_FILE;
+  const sslCert = cfg.ssl.certFile;
+  const sslKey = cfg.ssl.keyFile;
   if (sslCert && sslKey) {
     if (!fs.existsSync(sslCert) || !fs.existsSync(sslKey)) {
       console.error(`SSL cert/key not found — cert: ${sslCert}, key: ${sslKey}`);

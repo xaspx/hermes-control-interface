@@ -16,16 +16,34 @@
 git clone https://github.com/xaspx/hermes-control-interface.git hermes-control-interface
 cd hermes-control-interface
 npm install
-cp .env.example .env
 ```
 
-Edit `.env`:
+## Step 1b — Configure
+
+The dashboard supports two config patterns. Choose the one that fits your deployment:
+
+### Pattern A — Environment variables only
+
 ```bash
-HERMES_CONTROL_PASSWORD=<generate with: openssl rand -hex 32>
-HERMES_CONTROL_SECRET=<generate with: openssl rand -hex 32>
+cp .env.example .env
+# Edit .env and set:
+#   HERMES_CONTROL_PASSWORD=$(openssl rand -hex 32)
+#   HERMES_CONTROL_SECRET=$(openssl rand -hex 32)
 ```
 
-Verify it starts:
+### Pattern B — YAML config + env overrides (recommended for production)
+
+```bash
+cp hci.config.yaml.example hci.config.yaml
+# Edit hci.config.yaml (password and secret are required):
+#   password: "<generate with: openssl rand -hex 32>"
+#   secret:   "<generate with: openssl rand -hex 32>"
+```
+
+> **Why YAML?** `hci.config.yaml` can be committed to version control and shared across machines, while secrets (password, secret) are still supplied via environment variables (`.env` or systemd `Environment=` lines) so they never appear in plaintext in the repo.
+
+### Verify startup
+
 ```bash
 npm start
 # Should print: Hermes Control Interface running on port 10272
@@ -130,8 +148,8 @@ ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
-# Environment=HERMES_CONTROL_PASSWORD=your-p...here
-# Environment=HERMES_CONTROL_SECRET=***
+# Environment=HERMES_CONTROL_PASSWORD=<generate with: openssl rand -hex 32>
+# Environment=HERMES_CONTROL_SECRET=<generate with: openssl rand -hex 32>
 
 # Run as non-root user (recommended for production)
 # Create the user first: sudo useradd -r -s /bin/false hermes
@@ -154,6 +172,24 @@ sudo systemctl status hermes-control
 ## Step 5 — Verify
 
 Open `https://hermes.example.com` in your browser. You should see the login screen. Log in with your configured password.
+
+---
+
+## Direct HTTPS Without a Reverse Proxy
+
+The dashboard can terminate TLS directly. Add to `hci.config.yaml`:
+
+```yaml
+ssl:
+  cert_file: "/etc/letsencrypt/live/hermes.example.com/fullchain.pem"
+  key_file:  "/etc/letsencrypt/live/hermes.example.com/privkey.pem"
+```
+
+Or via environment variables:
+```bash
+HCI_SSL_CERT_FILE=/etc/letsencrypt/live/hermes.example.com/fullchain.pem
+HCI_SSL_KEY_FILE=/etc/letsencrypt/live/hermes.example.com/privkey.pem
+```
 
 ---
 
@@ -193,27 +229,33 @@ PORT=10272 npm start
 # Access via http://<server-ip>:10272
 ```
 
-The `Secure` cookie flag will prevent login cookies from working over plain HTTP. To override this for local development, you would need to modify the `setAuthCookie` function — but do not do this in production.
+The `Secure` cookie flag will prevent login cookies from working over plain HTTP. Set `session.secure: false` in `hci.config.yaml` or `HCI_SESSION_SECURE=false` for local development only.
 
 ---
 
-## Environment Variables
+## Configuration Reference
 
-Copy `.env.example` to `.env` and configure:
+See [CONFIG.md](./CONFIG.md) for the full configuration schema.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `HERMES_CONTROL_PASSWORD` | ✅ | — | Login password (min 32 chars in production) |
 | `HERMES_CONTROL_SECRET` | ✅ | — | HMAC secret for auth tokens |
 | `PORT` | — | `10272` | Server listen port |
-| `GATEWAY_API_KEY` | — | reads from `~/.hermes/config.yaml` | Gateway API auth key |
+| `GATEWAY_API_KEY` | — | auto | Gateway API auth key (auto-discovers from hermes config.yaml) |
 | `HCI_CORS_ORIGINS` | — | auto-detect → localhost | Comma-separated CORS origins for production |
 | `HERMES_CONTROL_HOME` | — | `~/.hermes` | Hermes root directory |
 | `HERMES_PROJECTS_ROOT` | — | parent of repo | Projects explorer root |
-
-**Gateway API Key:** By default, reads from `~/.hermes/config.yaml` → `platforms.api_server.extra.key`. Only set `GATEWAY_API_KEY` if your key differs from config.
+| `HCI_SSL_CERT_FILE` | — | — | SSL certificate path |
+| `HCI_SSL_KEY_FILE` | — | — | SSL private key path |
 
 **CORS Origins:** For localhost development, works out of the box (auto-detects from request origin). For production deployments:
 ```bash
 HCI_CORS_ORIGINS=https://your-domain.com,https://staging.your-domain.com
+```
+Or in `hci.config.yaml`:
+```yaml
+cors_origins:
+  - "https://your-domain.com"
+  - "https://staging.your-domain.com"
 ```

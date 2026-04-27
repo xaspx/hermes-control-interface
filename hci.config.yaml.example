@@ -1,0 +1,92 @@
+# Hermes Control Interface — hci.config.yaml
+# ─────────────────────────────────────────────────
+# Copy this file to hci.config.yaml and fill in your values:
+#   cp hci.config.yaml.example hci.config.yaml
+#
+# All keys are optional unless marked REQUIRED.
+# Environment variables always override the values in this file.
+# Secrets (password, secret) should be supplied via environment variables
+# in production — never hardcode them here.
+#
+# See docs/CONFIG.md for the full schema reference.
+
+# ── Required ────────────────────────────────────────────────────────────────
+# Password for the login screen. Use a long random string in production.
+# Generate one with: openssl rand -hex 32
+# This can be overridden with HERMES_CONTROL_PASSWORD env var.
+# password: "..."
+
+# HMAC secret for signing auth tokens and internal request verification.
+# Generate one with: openssl rand -hex 32
+# This can be overridden with HERMES_CONTROL_SECRET env var.
+# secret: "..."
+
+# ── Server ────────────────────────────────────────────────────────────────
+# TCP port to listen on. Default: 10272
+# Can be overridden with PORT env var.
+# port: 10272
+
+# ── Paths ─────────────────────────────────────────────────────────────────
+# Path to the Hermes root directory (file explorer root, avatar storage).
+# Default: ~/.hermes (resolved at runtime via os.homedir())
+# This is the top-level .hermes directory, NOT a profile subdirectory.
+# Can be overridden with HERMES_CONTROL_HOME env var.
+# hermes_home: "~/.hermes"
+
+# Root directory for the projects explorer panel.
+# Default: parent directory of the repo (e.g. /root/projects)
+# Can be overridden with HERMES_PROJECTS_ROOT env var.
+# projects_root: "~/projects"
+
+# ── Explorer roots ────────────────────────────────────────────────────────
+# Override the explorer root directories.
+# Supports two formats:
+#
+#   roots:
+#     - key: "projects"
+#       label: "Projects"
+#       root: "~/projects"
+#     - key: "hermes"
+#       label: "Home"
+#       root: "~/.hermes"
+#
+# Or as a comma-separated string:
+# roots: "~/projects,~/.hermes"
+#
+# Can be overridden with HERMES_CONTROL_ROOTS env var.
+# roots: null  # null means use hermes_home as sole default
+
+# ── SSL / HTTPS ─────────────────────────────────────────────────────────
+# Enable direct HTTPS (no reverse proxy required).
+# Generate self-signed certs with:
+#   openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=<your-ip-or-hostname>"
+# Can be overridden with HCI_SSL_CERT_FILE / HCI_SSL_KEY_FILE env vars.
+# ssl:
+#   cert_file: "/path/to/cert.pem"
+#   key_file:  "/path/to/key.pem"
+
+# ── Gateway API ──────────────────────────────────────────────────────────
+# API key for authenticating with Hermes Gateway API (api_server).
+# Default: auto-discovers from ~/.hermes/config.yaml → platforms.api_server.extra.key
+# Only set this if your gateway key differs from config.yaml.
+# Can be overridden with GATEWAY_API_KEY env var.
+# gateway_api_key: null
+
+# ── CORS ─────────────────────────────────────────────────────────────────
+# Allowed origins for gateway config injection (used by the TUI ↔ HCI integration).
+# Can be overridden with HCI_CORS_ORIGINS env var.
+# cors_origins:
+#   - "https://hermes.example.com"
+#   - "https://staging.example.com"
+
+# ── Rate limiting ─────────────────────────────────────────────────────────
+# Global rate limiting for all /api/* endpoints.
+# rate_limit:
+#   window_ms: 900000       # 15 minutes
+#   max_requests: 100      # per window
+
+# ── Session / cookie ──────────────────────────────────────────────────────
+# session:
+#   cookie_name: "hermes_ui_auth"       # default
+#   cookie_max_age: 86400               # seconds, default 24 h
+#   # secure: true                      # enforce Secure flag; omit for auto-detect (recommended)
