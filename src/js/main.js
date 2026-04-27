@@ -350,8 +350,9 @@ async function loadChat(container) {
           <div class="chat-header-right">
             <span id="chat-gateway-badge" class="chat-header-badge" title="Gateway status">🌐 …</span>
             <span class="chat-header-model-badge" id="chat-model-badge" style="display:none;"></span>
-            <button class="btn btn-ghost btn-sm" onclick="renameChatSession()" title="Rename">✏</button>
-            <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteChatSession()" title="Delete">🗑</button>
+            <button class="btn btn-ghost btn-sm" id="chat-info-toggle" title="Agent Info" onclick="toggleChatInfoPanel()">ℹ️</button>
+            <button class="btn btn-ghost btn-sm" onclick="renameChatSession()" title="Rename">✏️</button>
+            <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteChatSession()" title="Delete">🗑️</button>
           </div>
         </div>
         <div class="chat-messages" id="chat-messages"></div>
@@ -370,6 +371,15 @@ async function loadChat(container) {
           <span id="chat-queue-badge" class="queue-badge" style="display:none;">0</span>
           <button class="btn btn-primary" id="chat-send-btn" onclick="sendChatMessage()">Send</button>
           <button class="btn btn-danger btn-sm" id="chat-stop-btn" style="display:none;" onclick="stopChatStream()">Stop</button>
+        </div>
+      </div>
+      <div id="chat-info-panel" class="chat-info-panel collapsed">
+        <div class="chat-info-panel-header">
+          <span class="chat-info-panel-title">Agents</span>
+          <button class="chat-info-panel-close" onclick="toggleChatInfoPanel()">✕</button>
+        </div>
+        <div class="chat-info-panel-body" id="chat-info-panel-body">
+          <!-- Populated by updateChatInfoPanel() -->
         </div>
       </div>
     </div>
@@ -444,6 +454,9 @@ async function loadChat(container) {
   const profileSelect = document.getElementById('chat-profile');
   if (profileSelect) profileSelect.value = defaultProfile;
 
+  // Cache profiles for the info panel
+  _chatInfoProfiles = profiles;
+
   // Load sessions
   await refreshChatSidebar();
 
@@ -476,7 +489,9 @@ async function loadChat(container) {
           const data = await res.json();
           if (data.ok) {
             state._defaultProfile = selected;
+            profileSelect.value = selected; // Keep selector in sync with Hermes default
             showToast(`Default agent set to ${selected}`, 'success');
+            updateChatInfoPanel().catch(() => {}); // Refresh agent panel
           } else {
             showToast(data.error || 'Failed to set default', 'error');
             profileSelect.value = hermesDefault;
@@ -495,6 +510,7 @@ async function loadChat(container) {
     }
     refreshChatSidebar();
     updateGatewayBadge().catch(() => {});
+    updateChatInfoPanel().catch(() => {}); // Refresh agent panel on profile change
   });
 
   // Session search
@@ -949,6 +965,83 @@ function toggleChatSidebar() {
   if (backdrop) {
     backdrop.classList.toggle('active', state.chatSidebarOpen && window.innerWidth <= 768);
   }
+}
+
+function toggleChatInfoPanel() {
+  const panel = document.getElementById('chat-info-panel');
+  if (!panel) return;
+  const isCollapsed = panel.classList.contains('collapsed');
+  panel.classList.toggle('collapsed', !isCollapsed);
+  if (isCollapsed) {
+    updateChatInfoPanel();
+  }
+}
+
+// Update the agent info panel with current profile data
+let _chatInfoProfiles = [];
+async function updateChatInfoPanel() {
+  const panel = document.getElementById('chat-info-panel');
+  if (!panel || panel.classList.contains('collapsed')) return;
+  const body = document.getElementById('chat-info-panel-body');
+  if (!body) return;
+
+  // Refresh profile data
+  let profiles = _chatInfoProfiles;
+  try {
+    const res = await api('/api/profiles');
+    if (res.ok) profiles = res.profiles || [];
+    _chatInfoProfiles = profiles;
+  } catch { /* keep stale data */ }
+
+  if (!profiles.length) {
+    body.innerHTML = '<div style="color:var(--fg-muted);font-size:13px;text-align:center;padding:16px;">No agents found</div>';
+    return;
+  }
+
+  const defaultAgent = profiles.find(p => p.active);
+  const selectedName = document.getElementById('chat-profile')?.value || defaultAgent?.name || 'default';
+  const selectedProfile = profiles.find(p => p.name === selectedName) || defaultAgent;
+
+  // Current agent card
+  const currentCard = selectedProfile ? `
+    <div class="chat-info-current-agent">
+      <div class="chat-info-agent-name">
+        <span class="status-dot"></span>
+        ${escapeHtml(selectedProfile.name)}
+      </div>
+      <div class="chat-info-agent-model">${escapeHtml(selectedProfile.model || '—')}</div>
+      <div class="chat-info-agent-gateway">🌐 ${escapeHtml(selectedProfile.gateway || '—')}</div>
+    </div>
+  ` : '';
+
+  // All agents list
+  const agentItems = profiles.map(p => {
+    const isDefault = p.active;
+    const isSelected = p.name === selectedName;
+    const status = p.gateway === 'running' ? 'running' : 'stopped';
+    return `
+      <div class="chat-info-agent-item ${isDefault ? 'is-default' : ''}" title="Model: ${escapeHtml(p.model || '—')}\nGateway: ${escapeHtml(p.gateway || '—')}">
+        <span class="agent-dot ${status}"></span>
+        <div class="agent-info">
+          <div class="agent-name">${escapeHtml(p.name)}</div>
+          <div class="agent-model">${escapeHtml(p.model || '—')}</div>
+        </div>
+        ${isDefault ? '<span class="agent-badge default">★ default</span>' : ''}
+        ${isSelected && !isDefault ? '<span class="agent-badge active">selected</span>' : ''}
+      </div>
+    `;
+  }).join('');
+
+  body.innerHTML = `
+    <div class="chat-info-section">
+      <div class="chat-info-section-label">Current Agent</div>
+      ${currentCard}
+    </div>
+    <div class="chat-info-section">
+      <div class="chat-info-section-label">All Agents (${profiles.length})</div>
+      <div class="chat-info-agent-list">${agentItems}</div>
+    </div>
+  `;
 }
 
 // Stop active chat stream (Gateway API or CLI or WS)
