@@ -608,6 +608,9 @@ function filterChatBySource(value) {
 async function reloadCurrentSessionMessages() {
   const sessionId = state._currentChatSession;
   if (!sessionId) return;
+  // Capture the session ID at call time so a concurrent session
+  // switch cannot cause us to overwrite the new session's view with old data.
+  const expectedSession = sessionId;
   const profile = document.getElementById('chat-profile')?.value || 'default';
   const container = document.getElementById('chat-messages');
   const statsEl = document.getElementById('chat-status-session');
@@ -619,6 +622,13 @@ async function reloadCurrentSessionMessages() {
     const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?profile=${encodeURIComponent(profile)}`, { credentials: 'include' });
     if (!r.ok) { console.warn('[Chat] reload messages failed:', r.status); return; }
     const data = await r.json();
+
+    // Stale guard: if the session switched while the fetch was in flight,
+    // discard the response to avoid overwriting the new session's view.
+    if (state._currentChatSession !== expectedSession) {
+      console.warn('[Chat] session changed during reload, discarding stale response');
+      return;
+    }
 
     // Token info
     if (tokensEl && data.session) {
@@ -1315,11 +1325,14 @@ function handleToolStart(toolId, name, context) {
   const tc = ensureToolCards();
   const messagesDiv = document.getElementById('chat-messages');
   const streamEl = document.getElementById('chat-streaming');
-  const targetDiv = streamEl?.querySelector('.msg-body');
-  if (targetDiv) {
-    const card = addToolCallCard(targetDiv, toolId, name, context);
-    tc.set(toolId, card);
-  }
+  // Guard: if streaming element is no longer in the DOM (e.g. replaced by
+  // finalizeWsChat or a new message cycle), skip tool card insertion.
+  // The messages will be reloaded from DB when the stream finalizes.
+  if (!streamEl || !document.contains(streamEl)) return;
+  const targetDiv = streamEl.querySelector('.msg-body');
+  if (!targetDiv || !document.contains(targetDiv)) return;
+  const card = addToolCallCard(targetDiv, toolId, name, context);
+  tc.set(toolId, card);
   if (messagesDiv) messagesDiv.scrollTop = messagesDiv.scrollHeight;
   // Live tool count indicator
   state._wsToolCount = (state._wsToolCount || 0) + 1;
@@ -1329,6 +1342,8 @@ function handleToolStart(toolId, name, context) {
 function handleToolProgress(name, preview) {
   const tc = ensureToolCards();
   for (const [id, el] of tc) {
+    // Guard: skip if card is no longer in DOM (orphaned by finalizeWsChat)
+    if (!document.contains(el)) continue;
     const previewEl = el.querySelector('.tool-card-preview');
     if (previewEl && preview) previewEl.textContent = preview;
   }
@@ -1337,32 +1352,36 @@ function handleToolProgress(name, preview) {
 function handleToolDone(toolId, name, summary, error, inlineDiff) {
   const tc = ensureToolCards();
   const card = tc.get(toolId);
-  if (card) {
-    const statusEl = card.querySelector('.tool-card-status');
-    if (statusEl) {
-      statusEl.textContent = error ? 'error' : 'done';
-      statusEl.className = `tool-card-status ${error ? 'error' : 'done'}`;
-    }
-    const resultEl = card.querySelector('.tool-card-result');
-    if (resultEl) {
-      let resultText = error || '';
-      if (!error && inlineDiff) {
-        resultText = inlineDiff;
-      } else if (!error && summary) {
-        resultText = summary;
-      }
-      // 4000-char truncation with expand-on-click
-      if (resultText.length > 4000) {
-        resultEl.innerHTML = `
-          <pre class="tool-result-truncated">${escapeHtml(resultText.substring(0, 4000))}</pre>
-          <button class="tool-expand-btn" onclick="this.previousElementSibling.classList.toggle('tool-result-truncated'); this.previousElementSibling.classList.toggle('tool-result-full'); this.textContent = this.previousElementSibling.classList.contains('tool-result-full') ? 'Show less' : 'Show more (${(resultText.length - 4000).toLocaleString()} more chars)';">Show more (${(resultText.length - 4000).toLocaleString()} more chars)</button>`;
-        resultEl.classList.add('has-expand');
-      } else {
-        resultEl.innerHTML = `<pre>${escapeHtml(resultText)}</pre>`;
-      }
-    }
-    tc.delete(toolId);
+  if (!card) return; // card already removed (e.g. by finalizeWsChat)
+  // Guard: if the card is no longer in the DOM (streaming element replaced),
+  // skip DOM update — messages will be reloaded from DB.
+  if (!document.contains(card)) return;
+  const streamEl = document.getElementById('chat-streaming');
+  if (!streamEl || !document.contains(streamEl)) return;
+  const statusEl = card.querySelector('.tool-card-status');
+  if (statusEl) {
+    statusEl.textContent = error ? 'error' : 'done';
+    statusEl.className = `tool-card-status ${error ? 'error' : 'done'}`;
   }
+  const resultEl = card.querySelector('.tool-card-result');
+  if (resultEl) {
+    let resultText = error || '';
+    if (!error && inlineDiff) {
+      resultText = inlineDiff;
+    } else if (!error && summary) {
+      resultText = summary;
+    }
+    // 4000-char truncation with expand-on-click
+    if (resultText.length > 4000) {
+      resultEl.innerHTML = `
+        <pre class="tool-result-truncated">${escapeHtml(resultText.substring(0, 4000))}</pre>
+        <button class="tool-expand-btn" onclick="this.previousElementSibling.classList.toggle('tool-result-truncated'); this.previousElementSibling.classList.toggle('tool-result-full'); this.textContent = this.previousElementSibling.classList.contains('tool-result-full') ? 'Show less' : 'Show more (${(resultText.length - 4000).toLocaleString()} more chars)';">Show more (${(resultText.length - 4000).toLocaleString()} more chars)</button>`;
+      resultEl.classList.add('has-expand');
+    } else {
+      resultEl.innerHTML = `<pre>${escapeHtml(resultText)}</pre>`;
+    }
+  }
+  tc.delete(toolId);
   // Decrement live tool count
   state._wsToolCount = Math.max(0, (state._wsToolCount || 1) - 1);
   updateToolCountUI();
@@ -1730,6 +1749,8 @@ function finalizeToolCard(toolCards, callId, result) {
 
 function updateStreamContent(contentDiv, fullContent, toolCards, messagesDiv, elapsed) {
   if (!contentDiv) return;
+  // Guard: if contentDiv is no longer in the DOM (stream finalized), skip
+  if (!document.contains(contentDiv)) return;
   // Use a dedicated text span for streaming content (avoid full DOM rebuild)
   let textSpan = contentDiv.querySelector('#gw-stream-text');
   if (!textSpan) {
@@ -1737,9 +1758,9 @@ function updateStreamContent(contentDiv, fullContent, toolCards, messagesDiv, el
     textSpan.id = 'gw-stream-text';
     // Insert after any existing tool cards
     const lastCard = contentDiv.querySelector('.tool-call-card:last-of-type');
-    if (lastCard && lastCard.nextSibling) {
+    if (lastCard && contentDiv.contains(lastCard) && lastCard.nextSibling && contentDiv.contains(lastCard.nextSibling)) {
       contentDiv.insertBefore(textSpan, lastCard.nextSibling);
-    } else if (lastCard) {
+    } else if (lastCard && contentDiv.contains(lastCard)) {
       lastCard.after(textSpan);
     } else {
       contentDiv.prepend(textSpan);
