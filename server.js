@@ -82,11 +82,24 @@ function calculateCost(model, inputTokens, outputTokens, cacheReadTokens = 0, bi
 }
 
 // Async shell execution utility (non-blocking)
+function parseShellTimeout(timeout = '8s') {
+  if (typeof timeout === 'number' && Number.isFinite(timeout)) return timeout;
+  const raw = String(timeout).trim();
+  const match = raw.match(/^(\d+)(ms|s|m)?$/i);
+  if (!match) return 8000;
+  const value = Number(match[1]);
+  const unit = (match[2] || 's').toLowerCase();
+  if (unit === 'ms') return value;
+  if (unit === 'm') return value * 60 * 1000;
+  return value * 1000;
+}
+
 function shell(cmd, timeout = '8s') {
   return new Promise((resolve) => {
-    execFile('bash', ['-lc', `timeout ${timeout} ${cmd} 2>&1`], {
+    execFile('bash', ['-lc', `${cmd} 2>&1`], {
       encoding: 'utf8',
       maxBuffer: 64 * 1024,
+      timeout: parseShellTimeout(timeout),
     }, (err, stdout) => {
       resolve(err ? '' : stdout);
     });
@@ -1994,19 +2007,34 @@ app.post('/api/notifications/clear', requireAuth, requireCsrf, (req, res) => {
   res.json({ ok: true });
 });
 
+function formatCpuUsage() {
+  const load = os.loadavg()[0] || 0;
+  const cores = Math.max(os.cpus().length || 1, 1);
+  return `${Math.min(100, (load / cores) * 100).toFixed(1)}%`;
+}
+
+function formatMemoryUsage(precision = 0) {
+  const total = os.totalmem();
+  const used = total - os.freemem();
+  const usedMb = Math.round(used / 1024 / 1024);
+  const totalMb = Math.round(total / 1024 / 1024);
+  const pct = total > 0 ? (used / total) * 100 : 0;
+  return `${usedMb}/${totalMb}MB (${pct.toFixed(precision)}%)`;
+}
+
 // ============================================
 // System Health API
 // ============================================
 app.get('/api/system/health', requireAuth, async (req, res) => {
   try {
-    const [cpu, ram, disk, version, agents, sessions] = await Promise.all([
-      shell("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"),
-      shell("free -m | awk '/Mem:/ {printf \"%d/%dMB (%.0f%%)\", $3, $2, $3/$2*100}'"),
+    const [disk, version, agents, sessions] = await Promise.all([
       shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
       shell("hermes version 2>&1 | head -1"),
       shell("hermes profile list 2>&1 | wc -l"),
       shell("hermes sessions list --limit 1000 2>&1 | wc -l"),
     ]);
+    const cpu = formatCpuUsage();
+    const ram = formatMemoryUsage(0);
     // Format uptime from process.uptime()
     const upSec = process.uptime();
     const upDays = Math.floor(upSec / 86400);
@@ -2033,28 +2061,22 @@ app.get('/api/system/health', requireAuth, async (req, res) => {
 // System Monitoring — detailed metrics
 app.get('/api/monitoring', requireAuth, async (req, res) => {
   try {
-    const [cpu, mem, disk, loadAvg, netio, processes, uptime, version] = await Promise.all([
-      shell("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"),
-      shell("free -m | awk '/Mem:/ {printf \"%d/%dMB (%.1f%%)\", $3, $2, $3/$2*100}'"),
+    const [disk, processes, uptime, version] = await Promise.all([
       shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
-      shell("cat /proc/loadavg | awk '{print $1\", \"$2\", \"$3}'"),
-      shell("cat /proc/net/dev | awk 'NR==3 {print $1, $9}'"),
       shell("ps aux --no-headers | wc -l"),
       shell("uptime | awk -F'up ' '{split($2,a,\" user\");print a[1]\", \"$3}'"),
       shell("hermes version 2>&1 | head -1"),
     ]);
 
-    // Parse network interface (skip loopback)
-    const netParts = (netio || 'lo 0').trim().split(/\s+/);
-    const netInterface = netParts[0] || 'eth0';
-    const netBytes = netParts[1] || '0';
-    const netPackets = netParts[2] || '0';
-
-    // CPU percentage (already in format like "12.5%")
-    const cpuPct = (cpu.trim() || 'N/A').replace(/,/g, '');
+    const cpuPct = formatCpuUsage();
+    const memFmt = formatMemoryUsage(1);
+    const loadAvg = os.loadavg().slice(0, 3).map((n) => n.toFixed(2)).join(', ');
+    const netInterface = 'n/a';
+    const netBytes = '0';
+    const netPackets = '0';
 
     // Memory usage
-    const memInfo = mem.trim() || 'N/A';
+    const memInfo = memFmt;
 
     // Disk usage
     const diskInfo = disk.trim() || 'N/A';
