@@ -2,16 +2,16 @@
 
 ## Authentication
 
-**Password storage:** Plaintext comparison against the value in `HERMES_CONTROL_PASSWORD`. The password itself is never stored — only the live environment variable. Use a long, random value in production.
+**Password storage:** Dashboard users are stored in `~/.hermes/hci-users.json` with bcrypt password hashes. Plaintext passwords are not stored.
 
-**Password comparison:** Uses `crypto.timingSafeEqual` to prevent timing oracle attacks. This eliminates timing side-channels in the comparison itself.
+**Password comparison:** Uses `bcrypt.compareSync()` against the stored password hash.
 
 **Auth tokens:** HMAC-SHA256 signed tokens stored in an HttpOnly cookie. Tokens contain a Unix timestamp and are valid for 24 hours. The signature prevents tampering or forgery.
 
 **Rate limiting:** IPs are blocked from authenticating after 5 failed attempts within a 15-minute window. This does not prevent brute-force attacks entirely but significantly raises the cost.
 
 **Weaknesses:**
-- Single shared password — no per-user isolation
+- Local filesystem user store (no external identity provider)
 - No MFA
 - No login attempt notification (could silently tolerate brute force if attacker has enough time)
 
@@ -51,14 +51,14 @@ The `/ws` endpoint requires an authenticated session cookie. Unauthenticated Web
 
 ## What This Is Not
 
-- **Not multi-user.** All browser sessions share the same password. Treat it like a root password.
+- **Not enterprise identity.** Users are managed in a local JSON store, not LDAP/OIDC/SAML.
 - **Not hardened for hostile networks.** Designed for trusted LANs or HTTPS-reverse-proxied deployments.
 - **Not audited.** This analysis is a surface-level review, not a formal security audit.
 
 ## Recommendations for Production
 
 1. **Use HTTPS.** Always. Either behind an nginx reverse-proxy or on a platform that provides TLS.
-2. **Use a strong, randomly generated password.** Minimum 32 characters.
+2. **Use strong per-user passwords.** Minimum 8 characters; longer is better.
 3. **Rotate secrets periodically.** A rotated `HERMES_CONTROL_SECRET` invalidates all existing sessions.
 4. **Don't expose to the public internet** without a reverse-proxy and rate limiting.
 5. **Consider IP allowlisting** at the firewall or nginx level if access is limited to specific IPs.

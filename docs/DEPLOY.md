@@ -21,8 +21,7 @@ cp .env.example .env
 
 Edit `.env`:
 ```bash
-HERMES_CONTROL_PASSWORD=<generate with: openssl rand -hex 32>
-HERMES_CONTROL_SECRET=<generate with: openssl rand -hex 32>
+HERMES_CONTROL_SECRET=$(openssl rand -hex 32)
 ```
 
 Verify it starts:
@@ -126,12 +125,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/path/to/hermes-control-interface
+EnvironmentFile=/path/to/hermes-control-interface/.env
+Environment=NODE_ENV=production
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
-Environment=NODE_ENV=production
-# Environment=HERMES_CONTROL_PASSWORD=your-p...here
-# Environment=HERMES_CONTROL_SECRET=***
 
 # Run as non-root user (recommended for production)
 # Create the user first: sudo useradd -r -s /bin/false hermes
@@ -153,7 +151,7 @@ sudo systemctl status hermes-control
 
 ## Step 5 — Verify
 
-Open `https://hermes.example.com` in your browser. You should see the login screen. Log in with your configured password.
+Open `https://hermes.example.com` in your browser. On a fresh install, create the first admin account in the web UI, then log in with that account.
 
 ---
 

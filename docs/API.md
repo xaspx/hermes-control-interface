@@ -8,7 +8,7 @@ Base URL: `http://localhost:10272` (or your domain if behind a reverse-proxy)
 
 All endpoints marked **Auth required** require a valid session cookie (`hermes...auth`).
 
-Login first via `POST /api/login` to receive the cookie.
+Login first via `POST /api/auth/setup` on a fresh install, then `POST /api/auth/login` to receive the cookie.
 
 Internal endpoints (marked **Internal**) require the `x-hermes-control-secret` header matching `HERMES_CONTROL_SECRET` instead of a cookie.
 
@@ -49,7 +49,7 @@ Returns the current authentication state.
 
 ---
 
-### `POST /api/login`
+### `POST /api/auth/login`
 
 **Auth required:** No
 

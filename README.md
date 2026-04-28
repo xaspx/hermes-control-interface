@@ -136,8 +136,7 @@ npm install
 # Configure
 cp .env.example .env
 # Edit .env:
-#   HERMES_CONTROL_PASSWORD=your-password
-#   HERMES_CONTROL_SECRET=your-secret
+#   HERMES_CONTROL_SECRET=your-random-secret
 
 # Build frontend
 npx vite build
@@ -148,12 +147,14 @@ npm start
 
 Access at `http://localhost:10272` (default PORT).
 
+On a clean install, the web UI prompts you to create the first admin account.
+
 ## Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `HERMES_CONTROL_PASSWORD` | Yes | Login password |
-| `HERMES_CONTROL_SECRET` | Yes | CSRF + internal auth secret |
+| `HERMES_CONTROL_SECRET` | Yes | Auth token signing secret |
+| `HERMES_CONTROL_PASSWORD` | No | Legacy env password from pre-user-store auth |
 | `PORT` | No | Server port (default: 10272) |
 | `HERMES_CONTROL_HOME` | No | Hermes home dir (default: ~/.hermes) |
 | `HERMES_CONTROL_ROOTS` | No | File explorer roots (JSON array) |
@@ -179,11 +180,22 @@ auth.js                 # Multi-user auth system
 ## Development
 
 ```bash
-# Edit source in src/
-# Build
-npx vite build
-# Restart (never in foreground — use detached)
-kill $(lsof -t -i:10274) 2>/dev/null; sleep 1; nohup node server.js &>/dev/null & disown
+# Terminal 1: backend API on the default app port
+npm start
+
+# Terminal 2: Vite dev server for frontend changes
+npm run dev
+```
+
+- Backend default: `http://localhost:10272`
+- Frontend dev server: `http://localhost:5173`
+- To point the frontend at a different backend, set `HCI_BACKEND_URL` before `npm run dev`
+
+For production/static serving, rebuild the frontend and restart the backend:
+
+```bash
+npm run build
+npm start
 ```
 
 ## API

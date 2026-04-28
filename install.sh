@@ -51,38 +51,18 @@ else
 
   cp .env.example .env
 
-  # Generate secure secrets
-  if grep -q '^HERMES_CONTROL_PASSWORD=\*\*\*' .env 2>/dev/null; then
-    NEW_PASS=$(openssl_rand | cut -c1-24)
-    # Hash with bcrypt and save
-    HASHED=$(node -e "require('bcrypt').hashSync('${NEW_PASS}', 10)" 2>/dev/null || echo "")
-    if [[ -n "$HASHED" ]]; then
-      sed -i "s|^HERMES_CONTROL_PASSWORD=.*|HERMES_CONTROL_PASSWORD=${HASHED}|" .env
-      info "Generated and hashed HERMES_CONTROL_PASSWORD"
-      echo ""
-      warn "SAVE THIS PASSWORD — it will NOT be shown again:"
-      echo -e "  ${BOLD}${NEW_PASS}${RESET}"
-      echo ""
-    else
-      # Fallback: save plaintext (user must run reset-password.sh later)
-      sed -i "s|^HERMES_CONTROL_PASSWORD=.*|HERMES_CONTROL_PASSWORD=${NEW_PASS}|" .env
-      warn "bcrypt not available — password saved as plaintext"
-      warn "Run 'bash reset-password.sh' after install to hash it"
-      echo ""
-      warn "SAVE THIS PASSWORD:"
-      echo -e "  ${BOLD}${NEW_PASS}${RESET}"
-      echo ""
-    fi
+  if grep -q '^HERMES_CONTROL_SECRET=' .env 2>/dev/null; then
+    info ".env template copied"
   fi
 
-  if grep -q '^HERMES_CONTROL_SECRET=\*\*\*' .env 2>/dev/null; then
-    NEW_SECRET=$(uuid4 | cut -c1-64)
-    sed -i "s|^HERMES_CONTROL_SECRET=.*|HERMES_CONTROL_SECRET=${NEW_SECRET}|" .env
+  if grep -q '^HERMES_CONTROL_SECRET=***' .env 2>/dev/null; then
+    NEW_SECRET=$(openssl_rand | cut -c1-64)
+    perl -0pi -e 's/^HERMES_CONTROL_SECRET=.*/HERMES_CONTROL_SECRET='"${NEW_SECRET}"'/m' .env
     info "Generated HERMES_CONTROL_SECRET"
   fi
 
   chmod 600 .env
-  info ".env created — edit it to set your password and secrets"
+  info ".env created — edit it if you want to change defaults"
 fi
 
 # ── 4. Nginx reverse-proxy (optional) ─────────────────────────────────────────
@@ -208,10 +188,10 @@ echo "  1. Start the server:"
 echo "     npm start"
 echo ""
 echo "  2. Open the dashboard:"
-echo "     http://$(hostname -I | awk '{print $1}'):10272"
+LOCAL_IP=$(node -e 'const os=require("os"); const nets=os.networkInterfaces(); for (const entries of Object.values(nets)) { for (const entry of (entries || [])) { if (entry && entry.family === "IPv4" && !entry.internal) { console.log(entry.address); process.exit(0); } } } console.log("127.0.0.1");')
+echo "     http://${LOCAL_IP}:10272"
 echo ""
-echo "  To reset password later:"
-echo "     bash reset-password.sh"
+echo "  3. On first run, create the first admin account in the web UI"
 echo ""
 echo "  For HTTPS + auto-start, enable the systemd service."
 echo ""

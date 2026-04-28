@@ -1,65 +1,40 @@
 # Password Management
 
-## How It Works
+## Current Auth Model
 
-HCI stores the dashboard password in `.env` as `HERMES_CONTROL_PASSWORD`.
+The current HCI auth flow stores dashboard users in `~/.hermes/hci-users.json`.
 
-The password can be stored in two formats:
+On first run, the UI prompts you to create the first admin account. Passwords are stored as bcrypt hashes in that user store.
 
-### Bcrypt Hashed (Recommended)
-```
-HERMES_CONTROL_PASSWORD=$2b$10$xJ8kL3mN9pQ2rS5tU7vW1y...
-```
-- Starts with `$2b$` or `$2a$`
-- Compared using `bcrypt.compareSync()` — timing-safe, irreversible
-- If `.env` leaks, attacker cannot recover the password
+`HERMES_CONTROL_SECRET` in `.env` is still required for signing auth tokens and internal request verification.
 
-### Plaintext (Legacy)
-```
-HERMES_CONTROL_PASSWORD=mysecretpassword123
-```
-- Compared using `crypto.timingSafeEqual()` — timing-safe but reversible
-- If `.env` leaks, attacker can read the password directly
-
-The server auto-detects which format is used on login.
-
----
-
-## First-Time Setup
-
-When you run `bash install.sh`:
-1. A random 24-character password is generated
-2. It's hashed with bcrypt (10 rounds)
-3. The hash is saved to `.env`
-4. The plaintext password is shown ONCE — **save it somewhere safe**
-
-If bcrypt is not available (e.g., `npm install` hasn't finished), the password is saved as plaintext. Run `bash reset-password.sh` later to hash it.
+`HERMES_CONTROL_PASSWORD` is a legacy env var from the pre-user-store auth model and is no longer used by the current multi-user flow.
 
 ---
 
 ## Reset Password
 
-### Option 1 — Interactive (asks for password)
+### Option 1 — Interactive (asks for username and password)
 ```bash
 cd hermes-control-interface
 bash reset-password.sh
 ```
 
-### Option 2 — Direct (pass password as argument)
+### Option 2 — Direct
 ```bash
-bash reset-password.sh "my-new-password"
+bash reset-password.sh username "my-new-password"
 ```
 
 ### Option 3 — Via npm
 ```bash
-npm run reset-password
+npm run reset-password -- username "my-new-password"
 ```
 
 ### What happens:
-1. You enter a new password
-2. It's hashed with bcrypt (10 rounds)
-3. The hash replaces `HERMES_CONTROL_PASSWORD` in `.env`
-4. Restart the server for changes to take effect
+1. You choose a target username
+2. The new password is hashed with bcrypt (10 rounds)
+3. The matching user's `password_hash` is updated in `~/.hermes/hci-users.json`
+4. Existing sessions continue until logout or secret rotation
 
 ### After reset:
 ```bash
@@ -72,14 +47,11 @@ sudo systemctl restart hermes-control
 
 ---
 
-## Check Current Password Format
+## Check Current Users
 
 ```bash
-grep HERMES_CONTROL_PASSWORD .env
+cat ~/.hermes/hci-users.json
 ```
-
-- Starts with `$2b$` or `$2a$` → bcrypt hashed (secure)
-- Anything else → plaintext (run `reset-password.sh` to hash)
 
 ---
 

@@ -39,7 +39,9 @@ fi
 
 echo ""
 
-if [[ $# -ge 1 ]]; then
+if [[ $# -ge 2 ]]; then
+  node scripts/reset-password.js "$1" "$2"
+elif [[ $# -ge 1 ]]; then
   node scripts/reset-password.js "$1"
 else
   node scripts/reset-password.js

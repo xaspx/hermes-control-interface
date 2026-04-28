@@ -17,10 +17,14 @@ Thanks for your interest in contributing! This guide will help you get started.
 4. Copy the example config:
    ```bash
    cp .env.example .env
-   # Edit .env with your HERMES_CONTROL_PASSWORD and HERMES_CONTROL_SECRET
+   # Edit .env with your HERMES_CONTROL_SECRET
    ```
-5. Start the dev server:
+5. Start the app for development:
    ```bash
+   # Terminal 1
+   npm start
+
+   # Terminal 2
    npm run dev
    ```
 
@@ -42,12 +46,14 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 ```
 hermes-control-interface/
-├── server.js          # Express server, auth, PTY, WebSocket, APIs
-├── website/           # Frontend (vanilla JS, xterm.js)
-│   ├── app.js         # Main client-side logic
+├── server.js          # Express server, PTY, WebSocket, APIs
+├── auth.js            # Password + multi-user auth helpers
+├── src/               # Vite frontend source
 │   ├── index.html     # Dashboard HTML
-│   ├── styles.css     # Styles
-│   └── favicon.svg    # Favicon
+│   ├── js/main.js     # Main client-side logic
+│   ├── css/           # Theme, layout, components
+│   └── assets/        # SVG/icons
+├── dist/              # Built frontend served by Express
 ├── docs/              # Documentation
 ├── .env.example       # Config template
 ├── install.sh         # Interactive setup script

@@ -13,13 +13,26 @@ const rateLimit = require('express-rate-limit');
 const yaml = require('js-yaml');
 
 // Async shell execution utility (non-blocking)
+function parseShellTimeout(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const raw = String(value || '8s').trim();
+  const match = raw.match(/^(\d+)(ms|s|m)?$/i);
+  if (!match) return 8000;
+  const amount = Number(match[1]);
+  const unit = (match[2] || 'ms').toLowerCase();
+  if (unit === 'm') return amount * 60_000;
+  if (unit === 's') return amount * 1_000;
+  return amount;
+}
+
 function shell(cmd, timeout = '8s') {
   return new Promise((resolve) => {
-    execFile('bash', ['-lc', `timeout ${timeout} ${cmd} 2>&1`], {
+    execFile('bash', ['-lc', `${cmd} 2>&1`], {
       encoding: 'utf8',
       maxBuffer: 64 * 1024,
-    }, (err, stdout) => {
-      resolve(err ? '' : stdout);
+      timeout: parseShellTimeout(timeout),
+    }, (err, stdout, stderr) => {
+      resolve((stdout || stderr || '').trim());
     });
   });
 }
@@ -38,7 +51,6 @@ function execHermes(args, timeout = 30000) {
 }
 
 const PORT = Number(process.env.PORT || 10272);
-const CONTROL_PASSWORD = process.env.HERMES_CONTROL_PASSWORD;
 const CONTROL_SECRET = process.env.HERMES_CONTROL_SECRET;
 const AUTH_COOKIE = 'hermes_control_auth';
 const PROJECT_ROOT = __dirname;
@@ -90,8 +102,8 @@ const IGNORED_DIRS = new Set([
   'node_modules', '.git', 'cache', 'document_cache', 'audio_cache', 'checkpoints', 'logs', 'tmp', '.next', '.turbo', '.cache',
 ]);
 
-if (!CONTROL_PASSWORD || !CONTROL_SECRET) {
-  throw new Error('Missing HERMES_CONTROL_PASSWORD or HERMES_CONTROL_SECRET environment variables');
+if (!CONTROL_SECRET) {
+  throw new Error('Missing HERMES_CONTROL_SECRET environment variable');
 }
 
 const app = express();
@@ -1297,9 +1309,13 @@ app.post('/api/notifications/clear', requireAuth, (req, res) => {
 // ============================================
 app.get('/api/system/health', requireAuth, async (req, res) => {
   try {
-    const [cpu, ram, disk, version, agents, sessions] = await Promise.all([
-      shell("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"),
-      shell("free -m | awk '/Mem:/ {printf \"%d/%dMB (%.0f%%)\", $3, $2, $3/$2*100}'"),
+    const memTotalMb = Math.round(os.totalmem() / 1024 / 1024);
+    const memUsedMb = Math.round((os.totalmem() - os.freemem()) / 1024 / 1024);
+    const cpuCores = Math.max(1, os.cpus().length || 1);
+    const load1 = os.loadavg()[0] || 0;
+    const cpuPct = Math.min(100, Math.max(0, Math.round((load1 / cpuCores) * 100)));
+
+    const [disk, version, agents, sessions] = await Promise.all([
       shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
       shell("hermes version 2>&1 | head -1"),
       shell("hermes profile list 2>&1 | wc -l"),
@@ -1313,8 +1329,8 @@ app.get('/api/system/health', requireAuth, async (req, res) => {
     const uptime = upDays > 0 ? `${upDays}d ${upHrs}h ${upMins}m` : upHrs > 0 ? `${upHrs}h ${upMins}m` : `${upMins}m`;
     res.json({
       ok: true,
-      cpu: cpu.trim() || 'N/A',
-      ram: ram.trim() || 'N/A',
+      cpu: `${cpuPct}% (${load1.toFixed(2)} load / ${cpuCores} cores)`,
+      ram: `${memUsedMb}/${memTotalMb}MB (${Math.round((memUsedMb / memTotalMb) * 100)}%)`,
       disk: disk.trim() || 'N/A',
       uptime,
       hermes_version: version.trim() || 'N/A',

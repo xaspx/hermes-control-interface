@@ -8,21 +8,20 @@ Hermes Control Interface is configured entirely through environment variables.
 
 ## Required Variables
 
-### `HERMES_CONTROL_PASSWORD`
-
-Login password for the dashboard. There is no default — if this is not set the server refuses to start.
-
-Use a long random string in production:
-```bash
-openssl rand -hex 32
-```
-
 ### `HERMES_CONTROL_SECRET`
 
 HMAC secret for signing auth tokens and verifying internal requests. Must be set. Generate with:
 ```bash
 openssl rand -hex 32
 ```
+
+---
+
+## First-Run Auth Setup
+
+On a clean install, the web UI prompts you to create the first admin account and stores it in `~/.hermes/hci-users.json`.
+
+The old `HERMES_CONTROL_PASSWORD` env var is no longer used by the current multi-user flow.
 
 ---
 
@@ -88,10 +87,10 @@ If not set, defaults to `[HERMES_CONTROL_HOME]` (i.e. `/root/.hermes`).
 
 ## Verifying Your Config
 
-The server validates required variables on startup. If `HERMES_CONTROL_PASSWORD` or `HERMES_CONTROL_SECRET` is missing, it exits immediately with:
+The server validates required variables on startup. If `HERMES_CONTROL_SECRET` is missing, it exits immediately with:
 
 ```
-Error: Missing HERMES_CONTROL_PASSWORD or HERMES_CONTROL_SECRET environment variables
+Error: Missing HERMES_CONTROL_SECRET environment variable
 ```
 
 To check if your `.env` is loading correctly, start the server and look for:

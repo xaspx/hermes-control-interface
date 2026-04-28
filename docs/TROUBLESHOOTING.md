@@ -15,7 +15,7 @@ git clone https://github.com/xaspx/hermes-control-interface.git
 cd hermes-control-interface
 npm install
 cp .env.example .env
-# Edit .env — set HERMES_CONTROL_PASSWORD and HERMES_CONTROL_SECRET
+# Edit .env — set HERMES_CONTROL_SECRET
 npm start
 ```
 
@@ -25,13 +25,13 @@ See [README Quick Start](../README.md#quick-start) for details.
 
 ## Server won't start
 
-### `Error: Missing HERMES_CONTROL_PASSWORD or HERMES_CONTROL_SECRET environment variables`
+### `Error: Missing HERMES_CONTROL_SECRET environment variable`
 
-The `.env` file is missing or those variables are empty.
+The `.env` file is missing or `HERMES_CONTROL_SECRET` is empty.
 
 ```bash
 cp .env.example .env
-# Edit .env and fill in both values
+# Edit .env and fill in HERMES_CONTROL_SECRET
 npm start
 ```
 
@@ -73,13 +73,9 @@ node -v  # should be v20.x.x or higher
 
 ### Login form returns 401
 
-Wrong password. Check the value in `.env`:
+Wrong username or password.
 
-```bash
-grep HERMES_CONTROL_PASSWORD .env
-```
-
-There is no way to recover a lost password except by setting a new one in `.env`.
+If you have admin access through another account, reset the user's password in the UI. Otherwise use the CLI reset script documented in `docs/PASSWORD.md`.
 
 ### Login appears to succeed but immediately asks for password again
 

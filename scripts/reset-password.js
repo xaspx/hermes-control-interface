@@ -2,63 +2,41 @@
 'use strict';
 
 const bcrypt = require('bcrypt');
-const fs = require('fs');
-const path = require('path');
 const readline = require('readline');
+const { loadUsers, saveUsers, findUser } = require('../auth');
 
 const SALT_ROUNDS = 10;
-const ENV_PATH = path.resolve(__dirname, '..', '.env');
 
 function hashPassword(plain) {
   return bcrypt.hashSync(plain, SALT_ROUNDS);
 }
 
-function updateEnvFile(hashedPassword) {
-  let envContent = '';
-  try {
-    envContent = fs.readFileSync(ENV_PATH, 'utf8');
-  } catch (err) {
-    console.error(`Error reading .env file: ${err.message}`);
+function updateUserPassword(username, hashedPassword) {
+  const data = loadUsers();
+  const user = data.users.find((entry) => entry.username === username);
+  if (!user) {
+    console.error(`Error: User not found: ${username}`);
     process.exit(1);
   }
-
-  const lines = envContent.split('\n');
-  let found = false;
-  const updated = lines.map((line) => {
-    if (line.startsWith('HERMES_CONTROL_PASSWORD=')) {
-      found = true;
-      return `HERMES_CONTROL_PASSWORD=${hashedPassword}`;
-    }
-    return line;
-  });
-
-  if (!found) {
-    updated.push(`HERMES_CONTROL_PASSWORD=${hashedPassword}`);
-  }
-
-  fs.writeFileSync(ENV_PATH, updated.join('\n'), 'utf8');
+  user.password_hash = hashedPassword;
+  saveUsers(data);
 }
 
-function printConfirmation(hashedPassword) {
+function printConfirmation(username) {
   console.log('');
   console.log('Password has been updated and hashed with bcrypt.');
-  console.log('');
-  console.log('Hashed value written to .env:');
-  console.log(`  HERMES_CONTROL_PASSWORD=${hashedPassword}`);
-  console.log('');
-  console.log('Restart the server for changes to take effect:');
-  console.log('  sudo systemctl restart hermes-control');
+  console.log(`Updated user: ${username}`);
   console.log('');
 }
 
-async function promptPassword() {
+async function prompt(question) {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
   return new Promise((resolve) => {
-    rl.question('Enter new password: ', (answer) => {
+    rl.question(question, (answer) => {
       rl.close();
       resolve(answer);
     });
@@ -66,24 +44,33 @@ async function promptPassword() {
 }
 
 async function main() {
-  const arg = process.argv[2];
+  const usernameArg = process.argv[2];
+  const passwordArg = process.argv[3];
 
-  let newPassword;
-  if (arg) {
-    newPassword = arg;
-  } else {
-    newPassword = await promptPassword();
+  const username = (usernameArg || await prompt('Username to reset: ')).trim();
+  if (!username) {
+    console.error('Error: Username cannot be empty.');
+    process.exit(1);
+  }
+  if (!findUser(username)) {
+    console.error(`Error: User not found: ${username}`);
+    process.exit(1);
   }
 
+  const newPassword = passwordArg || await prompt('Enter new password: ');
   if (!newPassword || newPassword.trim() === '') {
     console.error('Error: Password cannot be empty.');
+    process.exit(1);
+  }
+  if (newPassword.trim().length < 8) {
+    console.error('Error: Password must be at least 8 characters.');
     process.exit(1);
   }
 
   console.log('Hashing password with bcrypt (10 rounds)...');
   const hashed = hashPassword(newPassword.trim());
-  updateEnvFile(hashed);
-  printConfirmation(hashed);
+  updateUserPassword(username, hashed);
+  printConfirmation(username);
 }
 
 main().catch((err) => {
