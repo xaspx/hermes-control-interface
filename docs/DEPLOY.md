@@ -27,7 +27,6 @@ The dashboard supports two config patterns. Choose the one that fits your deploy
 ```bash
 cp .env.example .env
 # Edit .env and set:
-#   HERMES_CONTROL_PASSWORD=$(openssl rand -hex 32)
 #   HERMES_CONTROL_SECRET=$(openssl rand -hex 32)
 ```
 
@@ -35,12 +34,11 @@ cp .env.example .env
 
 ```bash
 cp hci.config.yaml.example hci.config.yaml
-# Edit hci.config.yaml (password and secret are required):
-#   password: "<generate with: openssl rand -hex 32>"
-#   secret:   "<generate with: openssl rand -hex 32>"
+# Edit hci.config.yaml if you need non-secret defaults
+# Keep secrets in .env or Environment= lines
 ```
 
-> **Why YAML?** `hci.config.yaml` can be committed to version control and shared across machines, while secrets (password, secret) are still supplied via environment variables (`.env` or systemd `Environment=` lines) so they never appear in plaintext in the repo.
+> **Why YAML?** `hci.config.yaml` can be committed to version control and shared across machines, while secrets are still supplied via environment variables (`.env` or systemd `Environment=` lines) so they never appear in plaintext in the repo.
 
 ### Verify startup
 
@@ -148,7 +146,6 @@ ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
-# Environment=HERMES_CONTROL_PASSWORD=<generate with: openssl rand -hex 32>
 # Environment=HERMES_CONTROL_SECRET=<generate with: openssl rand -hex 32>
 
 # Run as non-root user (recommended for production)
@@ -171,7 +168,7 @@ sudo systemctl status hermes-control
 
 ## Step 5 — Verify
 
-Open `https://hermes.example.com` in your browser. You should see the login screen. Log in with your configured password.
+Open `https://hermes.example.com` in your browser. On a clean install, create the first admin account. After that, log in with the account you created.
 
 ---
 
@@ -239,8 +236,8 @@ See [CONFIG.md](./CONFIG.md) for the full configuration schema.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `HERMES_CONTROL_PASSWORD` | ✅ | — | Login password (min 32 chars in production) |
 | `HERMES_CONTROL_SECRET` | ✅ | — | HMAC secret for auth tokens |
+| `HERMES_CONTROL_PASSWORD` | — | — | Legacy single-password auth variable |
 | `PORT` | — | `10272` | Server listen port |
 | `GATEWAY_API_KEY` | — | auto | Gateway API auth key (auto-discovers from hermes config.yaml) |
 | `HCI_CORS_ORIGINS` | — | auto-detect → localhost | Comma-separated CORS origins for production |

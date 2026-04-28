@@ -157,8 +157,8 @@ const IGNORED_DIRS = new Set([
   'node_modules', '.git', 'cache', 'document_cache', 'audio_cache', 'checkpoints', 'logs', 'tmp', '.next', '.turbo', '.cache',
 ]);
 
-if (!CONTROL_PASSWORD || !CONTROL_SECRET) {
-  throw new Error('Missing HERMES_CONTROL_PASSWORD or HERMES_CONTROL_SECRET environment variables');
+if (!CONTROL_SECRET) {
+  throw new Error('Missing HERMES_CONTROL_SECRET environment variable');
 }
 
 const app = express();
@@ -1678,7 +1678,7 @@ async function buildDashboardState(authed = false) {
   return {
     title: 'Hermes Control Interface',
     now: new Date().toISOString(),
-    passwordRequired: true,
+    firstRun: isFirstRun(),
     authed,
     agent: buildSpriteState(),
     system: getSystem(),
@@ -1715,7 +1715,7 @@ async function buildDashboardState(authed = false) {
 
 app.get('/api/session', (req, res) => {
   const authed = isAuthed(req);
-  const response = { authenticated: authed, passwordRequired: true, identity: HCI_IDENTITY };
+  const response = { authenticated: authed, firstRun: isFirstRun(), identity: HCI_IDENTITY };
   if (authed) {
     const cookies = parseCookies(req);
     response.csrfToken = deriveCsrfToken(cookies[AUTH_COOKIE]);
@@ -3347,7 +3347,7 @@ const KEY_METADATA = {
   SLACK_BOT_TOKEN:         { cat: 'Messaging Platforms', desc: 'Slack bot token (xoxb)',      url: 'https://api.slack.com/apps', adv: false },
   WHATSAPP_SESSION_PATH:   { cat: 'Messaging Platforms', desc: 'WhatsApp session file path', url: '',  adv: false },
   // Agent Settings
-  HERMES_CONTROL_PASSWORD:  { cat: 'Agent Settings',   desc: 'HCI control password',         url: '',  adv: false },
+  HERMES_CONTROL_PASSWORD:  { cat: 'Agent Settings',   desc: 'Legacy HCI control password',  url: '',  adv: false },
   HERMES_CONTROL_SECRET:   { cat: 'Agent Settings',   desc: 'HCI control secret',           url: '',  adv: true },
   API_SERVER_ENABLED:      { cat: 'Agent Settings',   desc: 'Enable API server',             url: '',  adv: false },
   API_SERVER_PORT:         { cat: 'Agent Settings',   desc: 'API server port',               url: '',  adv: true },

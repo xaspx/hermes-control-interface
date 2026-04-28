@@ -73,8 +73,8 @@ A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousRes
 
 ### 🔐 Authentication
 
-- Single password login (configurable via `HERMES_CONTROL_PASSWORD`)
-- bcrypt password hashing (cost factor 10)
+- First-run admin setup when no users exist
+- Per-user bcrypt password hashing in the local user store
 - CSRF tokens on all mutating requests
 - Conditional Secure cookie flag (auto-detects HTTPS)
 - Rate limiting: 5 failed logins per 15 minutes per IP
@@ -334,9 +334,9 @@ npm install
 
 # 3. Configure
 cp .env.example .env
-# Edit .env and set:
-#   HERMES_CONTROL_PASSWORD=your-secure-password
-#   HERMES_CONTROL_SECRET=$(openssl rand -hex 32)
+# Edit .env:
+#   HERMES_CONTROL_SECRET=your-random-secret
+# Then start the app and create the first admin in the UI
 
 # 4. Build frontend
 npm run build
@@ -385,8 +385,8 @@ sudo systemctl start hermes-control
 
 | Variable | Required | Description |
 |---|---|---|
-| `HERMES_CONTROL_PASSWORD` | Yes | Login password |
 | `HERMES_CONTROL_SECRET` | Yes | CSRF + internal auth secret |
+| `HERMES_CONTROL_PASSWORD` | No | Legacy single-password auth variable |
 | `PORT` | No | Server port (default: 10272) |
 | `HERMES_CONTROL_HOME` | No | Hermes home dir (default: ~/.hermes) |
 | `HERMES_CONTROL_ROOTS` | No | File explorer roots (JSON array) |
@@ -394,28 +394,15 @@ sudo systemctl start hermes-control
 
 ---
 
-## Reset Password Without Dashboard Access
+## Access Recovery
 
-If you can't log in to the dashboard, reset the password via CLI:
+If you can't log in to the dashboard:
 
-**Option 1 — Edit .env directly**
-```bash
-# SSH into your server
-nano ~/.hermes/.env
-# Change HERMES_CONTROL_PASSWORD=your-new-password
+- verify `HERMES_CONTROL_SECRET` is still set correctly in `.env`
+- check whether any users still exist in `~/.hermes/hci-users.json`
+- if the user store is empty, restart the app and use the first-run setup screen to create a new admin
 
-# Restart
-sudo systemctl restart hermes-control
-# or: pkill node; npm start &
-```
-
-**Option 2 — Generate bcrypt hash via Node.js**
-```bash
-node -e "const bcrypt=require('bcrypt'); bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10).then(h=>console.log('HERMES_CONTROL_PASSWORD='+h))"
-# Copy the output to .env, then restart
-```
-
-**Key point:** `.env` is the source of truth. Dashboard access = server access. If you lose access to both, you must have server/SSH access to reset.
+**Key point:** the current auth flow is user-store based, not `.env`-password based.
 
 ---
 
@@ -443,12 +430,15 @@ auth.js                 # Multi-user auth + RBAC (bcrypt, sessions, permissions)
 ## Development
 
 ```bash
-# Edit source in src/
-npx vite build
+# Terminal 1: backend API on the default app port
+npm start
 
-# Restart (never in foreground — use detached)
-kill $(lsof -t -i:10272) 2>/dev/null
-nohup node server.js &>/dev/null & disown
+# Terminal 2: frontend dev server
+npx vite
+
+# Production build
+npm run build
+npm start
 ```
 
 ---

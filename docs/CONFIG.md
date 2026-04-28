@@ -5,7 +5,7 @@ Hermes Control Interface can be configured in two complementary ways:
 1. **`hci.config.yaml`** — declarative, version-controllable defaults (checked into git)
 2. **Environment variables** — runtime overrides (never stored in plaintext)
 
-Environment variables always take precedence over the YAML file, so secrets (password, secret, API keys) can be kept out of the config file and supplied via env.
+Environment variables always take precedence over the YAML file, so secrets (secret, API keys) can be kept out of the config file and supplied via env.
 
 ---
 
@@ -15,7 +15,7 @@ Environment variables always take precedence over the YAML file, so secrets (pas
 
 ```bash
 cp .env.example .env
-# Fill in HERMES_CONTROL_PASSWORD and HERMES_CONTROL_SECRET
+# Fill in HERMES_CONTROL_SECRET
 npm start
 ```
 
@@ -24,7 +24,7 @@ npm start
 ```bash
 # Create hci.config.yaml next to server.js
 cp hci.config.yaml.example hci.config.yaml
-# Fill in password and secret (all other keys are optional)
+# Fill in secret if you use YAML defaults (all other keys are optional)
 npm start
 ```
 
@@ -44,7 +44,7 @@ Create `hci.config.yaml` in the repo root (next to `server.js`). All keys are op
 ```yaml
 # ── Required ────────────────────────────────────────────────────────────
 
-password: "your-long-random-password"          # REQUIRED
+# password is legacy and no longer required for the current first-run auth flow
 secret:   "your-hmac-secret"                  # REQUIRED
 
 # ── Server ──────────────────────────────────────────────────────────────
@@ -106,8 +106,8 @@ session:
 
 | Variable | Default | Description |
 |---|---|---|
-| `HERMES_CONTROL_PASSWORD` | — | **Required.** Login password |
 | `HERMES_CONTROL_SECRET` | — | **Required.** HMAC signing secret |
+| `HERMES_CONTROL_PASSWORD` | — | Legacy single-password auth variable |
 | `PORT` | `10272` | Server listen port |
 | `HERMES_CONTROL_HOME` | `~/.hermes` | Hermes root directory |
 | `HERMES_PROJECTS_ROOT` | auto | Projects explorer root |
@@ -146,10 +146,10 @@ When the YAML file has nested keys, they map to env vars using `SECTION_KEY` con
 
 ## Verifying Your Config
 
-The server validates required variables on startup. If `password` or `secret` is missing from both `hci.config.yaml` and the environment, it exits immediately with:
+The server validates required variables on startup. If `HERMES_CONTROL_SECRET` is missing, it exits immediately with:
 
 ```
-Error: Missing HERMES_CONTROL_PASSWORD (set env var or password in hci.config.yaml)
+Error: Missing HERMES_CONTROL_SECRET environment variable
 ```
 
 To check if your config is loading correctly, start the server and look for:
@@ -177,13 +177,11 @@ rate_limit:
 
 **`.env`** (NOT committed — secrets only):
 ```bash
-HERMES_CONTROL_PASSWORD=$(openssl rand -hex 32)
 HERMES_CONTROL_SECRET=$(openssl rand -hex 32)
 ```
 
 **systemd `Environment=` directives** (alternative to `.env`):
 ```ini
-Environment=HERMES_CONTROL_PASSWORD=<generated>
 Environment=HERMES_CONTROL_SECRET=<generated>
 ```
 

@@ -8,7 +8,7 @@ Base URL: `http://localhost:10272` (or your domain if behind a reverse-proxy)
 
 All endpoints marked **Auth required** require a valid session cookie (`hermes...auth`).
 
-Login first via `POST /api/auth/login` to receive the cookie.
+Use `GET /api/auth/status` first. If it reports `first_run: true`, create the first admin with `POST /api/auth/setup`. Otherwise log in via `POST /api/auth/login`.
 
 Internal endpoints (marked **Internal**) require the `x-hermes-control-secret` header matching `HERMES_CONTROL_SECRET` instead of a cookie.
 
@@ -37,13 +37,37 @@ Returns a basic health check.
 
 **Auth required:** No
 
-Returns the current authentication state.
+Returns whether the app is in first-run mode and how many users exist.
 
 ```json
 {
-  "authenticated": false,
-  "passwordRequired": true,
-  "identity": "root@hermes"
+  "ok": true,
+  "first_run": true,
+  "user_count": 0
+}
+```
+
+---
+
+### `POST /api/auth/setup`
+
+**Auth required:** No
+
+**Rate limited:** 5 attempts per 15 minutes per IP.
+
+Creates the first admin account when no users exist.
+
+**Request body:**
+```json
+{ "username": "admin", "password": "your-password" }
+```
+
+**Success response (200):**
+```json
+{
+  "ok": true,
+  "user": { "username": "admin", "role": "admin" },
+  "csrfToken": "..."
 }
 ```
 
@@ -57,18 +81,27 @@ Returns the current authentication state.
 
 **Request body:**
 ```json
-{ "password": "***" }
+{ "username": "admin", "password": "your-password" }
 ```
 
 **Success response (200):**
 ```json
-{ "ok": true }
+{
+  "ok": true,
+  "user": { "username": "admin", "role": "admin", "permissions": ["..."] },
+  "csrfToken": "..."
+}
 ```
 Sets the `hermes...auth` cookie.
 
 **Failure response (401):**
 ```json
-{ "ok": false, "error": "bad password" }
+{ "ok": false, "error": "Invalid username or password" }
+```
+
+**First-run response (400):**
+```json
+{ "ok": false, "error": "first_run", "message": "No users exist. Please create an admin account." }
 ```
 
 **Rate limited response (429):**

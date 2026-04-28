@@ -4,13 +4,13 @@
 
 ## Server won't start
 
-### `Error: Missing HERMES_CONTROL_PASSWORD or HERMES_CONTROL_SECRET environment variables`
+### `Error: Missing HERMES_CONTROL_SECRET environment variable`
 
-The `.env` file is missing or those variables are empty.
+The `.env` file is missing or `HERMES_CONTROL_SECRET` is empty.
 
 ```bash
 cp .env.example .env
-# Edit .env and fill in both values
+# Edit .env and fill in HERMES_CONTROL_SECRET
 npm start
 ```
 
@@ -52,13 +52,16 @@ node -v  # should be v20.x.x or higher
 
 ### Login form returns 401
 
-Wrong password. Check the value in `.env`:
+Wrong username or password. In the current auth flow, credentials live in the local user store, not `.env`.
+
+Checks:
 
 ```bash
-grep HERMES_CONTROL_PASSWORD .env
+curl http://localhost:10272/api/auth/status
 ```
 
-There is no way to recover a lost password except by setting a new one in `.env`.
+- If `first_run` is `true`, create the first admin account in the UI.
+- If users already exist, log in with a valid username/password from the local user store.
 
 ### Login appears to succeed but immediately asks for password again
 
@@ -199,4 +202,5 @@ sudo journalctl -u hermes-control -n 50
 Common issues:
 - Wrong `WorkingDirectory` in the service file
 - Missing `.env` — systemd doesn't load it automatically. Either set `Environment=` vars in the service file, or use `EnvironmentFile=/path/to/.env`
+- On macOS, Linux-only commands like `top -bn1` and `free -m` will break health panels unless you run a patched build
 - `node` not on PATH — use the absolute path in `ExecStart`, e.g. `/usr/bin/node`

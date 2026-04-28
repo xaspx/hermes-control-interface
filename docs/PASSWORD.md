@@ -2,68 +2,35 @@
 
 ## How It Works
 
-HCI stores the dashboard password in `.env` as `HERMES_CONTROL_PASSWORD`.
+HCI uses a local user store at `~/.hermes/hci-users.json`.
 
-The password can be stored in two formats:
-
-### Bcrypt Hashed (Recommended)
-```
-HERMES_CONTROL_PASSWORD=$2b$10...y...
-```
-- Starts with `$2b$` or `$2a$`
-- Compared using `bcrypt.compareSync()` — timing-safe, irreversible
-- If `.env` leaks, attacker cannot recover the password
-
-### Plaintext
-```
-HERMES_CONTROL_PASSWORD=mysecr...d123
-```
-- Compared using `crypto.timingSafeEqual()` — timing-safe but reversible
-- If `.env` leaks, attacker can read the password directly
-
-The server auto-detects which format is used on login.
+- On first run, the UI prompts you to create the first admin account.
+- Passwords are stored as bcrypt hashes in the user store.
+- `HERMES_CONTROL_SECRET` in `.env` is still required for signing auth tokens and internal request verification.
+- `HERMES_CONTROL_PASSWORD` is a legacy env var from the older single-password auth model and is no longer required for the current flow.
 
 ---
 
-## Generate a Secure Password
+## First Run
 
-Generate a bcrypt-hashed password with Node.js:
-```bash
-node -e "const bcrypt=require('bcrypt'); bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10).then(h=>console.log('HERMES_CONTROL_PASSWORD='+h))"
-```
-
----
-
-## Reset Password
-
-1. Edit `.env` and set a new value for `HERMES_CONTROL_PASSWORD`
-2. If using bcrypt format, regenerate the hash using the command above
-3. Restart the server:
-```bash
-# Direct
-npm start
-
-# Systemd
-sudo systemctl restart hermes-control
-```
+1. Copy `.env.example` to `.env`
+2. Set `HERMES_CONTROL_SECRET`
+3. Start the server
+4. Open the UI and create the first admin account
 
 ---
 
-## Check Current Password Format
+## Reset a User Password
 
-```bash
-grep HERMES_CONTROL_PASSWORD .env
-```
+Use the dashboard's user-management flow, or edit the user store with a trusted local maintenance path if you have to recover access.
 
-- Starts with `$2b$` or `$2a$` → bcrypt hashed (secure)
-- Anything else → plaintext (edit `.env` to set a new bcrypt-hashed value)
+If no users exist, the app returns to first-run setup and lets you create a new admin account.
 
 ---
 
 ## Security Notes
 
-- The bcrypt hash is **one-way** — you cannot recover the plaintext from it
-- If you forget your password, you MUST reset it (there's no recovery)
-- Keep your `.env` file permissions at `600` (`chmod 600 .env`)
-- Never commit `.env` to git (it's in `.gitignore` by default)
-- `HERMES_CONTROL_SECRET` is separate — it's used for auth token signing, not password comparison
+- Password hashes are one-way bcrypt hashes
+- Keep `.env` permissions tight (`chmod 600 .env`)
+- Never commit `.env` to git
+- Rotating `HERMES_CONTROL_SECRET` invalidates existing sessions
