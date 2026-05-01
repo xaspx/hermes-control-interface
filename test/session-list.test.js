@@ -17,6 +17,7 @@ Parent Session                   hello world                              2h ago
       title: 'Parent Session',
       preview: 'hello world',
       lastActive: '2h ago',
+      source: null,
     },
   ]);
 });
