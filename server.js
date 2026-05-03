@@ -82,13 +82,26 @@ function calculateCost(model, inputTokens, outputTokens, cacheReadTokens = 0, bi
 }
 
 // Async shell execution utility (non-blocking)
+function parseShellTimeout(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const raw = String(value || '8s').trim();
+  const match = raw.match(/^(\d+)(ms|s|m)?$/i);
+  if (!match) return 8000;
+  const amount = Number(match[1]);
+  const unit = (match[2] || 'ms').toLowerCase();
+  if (unit === 'm') return amount * 60_000;
+  if (unit === 's') return amount * 1_000;
+  return amount;
+}
+
 function shell(cmd, timeout = '8s') {
   return new Promise((resolve) => {
-    execFile('bash', ['-lc', `timeout ${timeout} ${cmd} 2>&1`], {
+    execFile('bash', ['-lc', `${cmd} 2>&1`], {
       encoding: 'utf8',
       maxBuffer: 64 * 1024,
-    }, (err, stdout) => {
-      resolve(err ? '' : stdout);
+      timeout: parseShellTimeout(timeout),
+    }, (err, stdout, stderr) => {
+      resolve((stdout || stderr || '').trim());
     });
   });
 }
@@ -2030,9 +2043,14 @@ app.post('/api/notifications/clear', requireAuth, requireCsrf, (req, res) => {
 // ============================================
 app.get('/api/system/health', requireAuth, async (req, res) => {
   try {
-    const [cpu, ram, disk, version, agents, sessions] = await Promise.all([
-      shell("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"),
-      shell("free -m | awk '/Mem:/ {printf \"%d/%dMB (%.0f%%)\", $3, $2, $3/$2*100}'"),
+    // Use os module for CPU/RAM (cross-platform, no top/free dependency)
+    const memTotalMb = Math.round(os.totalmem() / 1024 / 1024);
+    const memUsedMb = Math.round((os.totalmem() - os.freemem()) / 1024 / 1024);
+    const cpuCores = Math.max(1, os.cpus().length || 1);
+    const load1 = os.loadavg()[0] || 0;
+    const cpuPct = Math.min(100, Math.max(0, Math.round((load1 / cpuCores) * 100)));
+
+    const [disk, version, agents, sessions] = await Promise.all([
       shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
       shell("hermes version 2>&1 | head -1"),
       shell("hermes profile list 2>&1 | wc -l"),
@@ -2046,8 +2064,8 @@ app.get('/api/system/health', requireAuth, async (req, res) => {
     const uptime = upDays > 0 ? `${upDays}d ${upHrs}h ${upMins}m` : upHrs > 0 ? `${upHrs}h ${upMins}m` : `${upMins}m`;
     res.json({
       ok: true,
-      cpu: cpu.trim() || 'N/A',
-      ram: ram.trim() || 'N/A',
+      cpu: `${cpuPct}% (${load1.toFixed(2)} load / ${cpuCores} cores)`,
+      ram: `${memUsedMb}/${memTotalMb}MB (${Math.round((memUsedMb / memTotalMb) * 100)}%)`,
       disk: disk.trim() || 'N/A',
       uptime,
       hermes_version: version.trim() || 'N/A',
@@ -2064,11 +2082,16 @@ app.get('/api/system/health', requireAuth, async (req, res) => {
 // System Monitoring — detailed metrics
 app.get('/api/monitoring', requireAuth, async (req, res) => {
   try {
-    const [cpu, mem, disk, loadAvg, netio, processes, uptime, version] = await Promise.all([
-      shell("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"),
-      shell("free -m | awk '/Mem:/ {printf \"%d/%dMB (%.1f%%)\", $3, $2, $3/$2*100}'"),
+    // Use os module for CPU/RAM (cross-platform)
+    const memTotalMb = Math.round(os.totalmem() / 1024 / 1024);
+    const memUsedMb = Math.round((os.totalmem() - os.freemem()) / 1024 / 1024);
+    const cpuCores = Math.max(1, os.cpus().length || 1);
+    const loadAvg = os.loadavg();
+    const load1 = loadAvg[0] || 0;
+    const cpuPct = Math.min(100, Math.max(0, Math.round((load1 / cpuCores) * 100)));
+
+    const [disk, netio, processes, uptime, version] = await Promise.all([
       shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
-      shell("cat /proc/loadavg | awk '{print $1\", \"$2\", \"$3}'"),
       shell("cat /proc/net/dev | awk 'NR==3 {print $1, $9}'"),
       shell("ps aux --no-headers | wc -l"),
       shell("uptime | awk -F'up ' '{split($2,a,\" user\");print a[1]\", \"$3}'"),
@@ -2081,25 +2104,18 @@ app.get('/api/monitoring', requireAuth, async (req, res) => {
     const netBytes = netParts[1] || '0';
     const netPackets = netParts[2] || '0';
 
-    // CPU percentage (already in format like "12.5%")
-    const cpuPct = (cpu.trim() || 'N/A').replace(/,/g, '');
-    const cpuPctNum = parseFloat(cpuPct) || 0;
-
     // Memory usage
-    const memInfo = mem.trim() || 'N/A';
-    const memPctMatch = memInfo.match(/\(([\d.]+)%\)/);
-    const memPctNum = memPctMatch ? parseFloat(memPctMatch[1]) : 0;
+    const memInfo = `${memUsedMb}/${memTotalMb}MB (${Math.round((memUsedMb / memTotalMb) * 100)}%)`;
+    const memPctNum = Math.round((memUsedMb / memTotalMb) * 100);
 
     // Disk usage
     const diskInfo = disk.trim() || 'N/A';
     const diskPctMatch = diskInfo.match(/\((\d+)%\)/);
     const diskPctNum = diskPctMatch ? parseFloat(diskPctMatch[1]) : 0;
 
-    // Load averages
-    const loadParts = (loadAvg.trim() || '0, 0, 0').split(',').map(l => l.trim());
-    const load1 = loadParts[0] || '0';
-    const load5 = loadParts[1] || '0';
-    const load15 = loadParts[2] || '0';
+    // Load averages (already computed from os.loadavg())
+    const load5 = loadAvg[1]?.toFixed(2) || '0';
+    const load15 = loadAvg[2]?.toFixed(2) || '0';
 
     // Process count
     const procCount = parseInt(processes.trim()) || 0;
@@ -2119,13 +2135,13 @@ app.get('/api/monitoring', requireAuth, async (req, res) => {
 
     res.json({
       ok: true,
-      cpu: cpuPct,
+      cpu: `${cpuPct}%`,
       memory: memInfo,
       disk: diskInfo,
-      cpu_pct: cpuPctNum,
+      cpu_pct: cpuPct,
       mem_pct: memPctNum,
       disk_pct: diskPctNum,
-      load: { avg1: load1, avg5: load5, avg15: load15 },
+      load: { avg1: load1.toFixed(2), avg5: load5, avg15: load15 },
       network: { interface: netInterface, bytes: netBytes, packets: netPackets },
       processes: procCount,
       uptime: upInfo,
