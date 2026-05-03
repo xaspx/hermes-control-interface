@@ -2295,7 +2295,6 @@ async function loadHome(container) {
       </div>
     </div>
     <div class="card-grid" id="home-cards">
-      <div class="card"><div class="card-title">System Health</div><div class="loading">Loading</div></div>
       <div class="card"><div class="card-title">Agent Overview</div><div class="loading">Loading</div></div>
     </div>
     <div class="card-grid" id="home-bottom" style="margin-top:16px;">
@@ -2308,69 +2307,26 @@ async function loadHome(container) {
   `;
 
   try {
-    const [monRes, profilesRes, agentRes, cronRes] = await Promise.all([
-      api('/api/monitoring'),
+    const [profilesRes, agentRes, cronRes] = await Promise.all([
       api('/api/profiles'),
       api('/api/agent/status'),
       api('/api/cron/list', { method: 'POST', body: '{}' }),
     ]);
 
-    // Row 1: System Health + Agent Overview (merged)
+    // Row 1: Agent Overview only (System Health/Details moved to Monitor page)
     const cardsEl = document.getElementById('home-cards');
-    if (monRes.ok) {
-      const m = monRes;
-      cardsEl.innerHTML = `
-        <div class="card">
-          <div class="card-title">System Health</div>
-          <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value">${m.cpu || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">RAM</span><span class="stat-value">${m.memory || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Disk</span><span class="stat-value">${m.disk || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Load</span><span class="stat-value">${m.load ? `${m.load.avg1}, ${m.load.avg5}, ${m.load.avg15}` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Processes</span><span class="stat-value">${m.processes || 0}</span></div>
-          <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-value">${m.uptime || 'N/A'}</span></div>
-        </div>
-        <div class="card">
-          <div class="card-title">System Details</div>
-          <div class="stat-row"><span class="stat-label">Network</span><span class="stat-value">${m.network ? `${m.network.interface} (${formatNumber(m.network.bytes)}B)` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Node RSS</span><span class="stat-value">${m.node_memory ? `${m.node_memory.rss_mb} MB` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Heap Used</span><span class="stat-value">${m.node_memory ? `${m.node_memory.heap_used_mb}/${m.node_memory.heap_total_mb} MB` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Hermes</span><span class="stat-value">${m.hermes_version || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">HCI</span><span class="stat-value">${m.hci_version || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Node.js</span><span class="stat-value">${m.node_version || 'N/A'}</span></div>
-        </div>
-        <div class="card">
-          <div class="card-title">Agent Overview</div>
-          <div class="stat-row"><span class="stat-label">Model</span><span class="stat-value">${agentRes.ok ? (agentRes.model || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Provider</span><span class="stat-value">${agentRes.ok ? (agentRes.provider || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Gateway</span><span class="stat-value ${agentRes.ok && agentRes.gatewayStatus?.includes('running') ? 'status-ok' : 'status-off'}">${agentRes.ok ? (agentRes.gatewayStatus || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">API Keys</span><span class="stat-value">${agentRes.ok ? `${agentRes.apiKeys?.active || 0}/${agentRes.apiKeys?.total || 0} active` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Platforms</span><span class="stat-value">${agentRes.ok ? (agentRes.platforms?.filter(p => p.configured).map(p => p.name).join(', ') || 'None') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Cron</span><span class="stat-value">${cronRes?.jobs?.length || 0} jobs</span></div>
-          <div class="stat-row"><span class="stat-label">Sessions</span><span class="stat-value">${agentRes.ok ? `${agentRes.activeSessions || 0} active` : 'N/A'}</span></div>
-        </div>
-      `;
-    } else if (healthRes.ok) {
-      // Fallback to /api/system/health if /api/monitoring fails
-      cardsEl.innerHTML = `
-        <div class="card">
-          <div class="card-title">System Health</div>
-          <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value">${healthRes.cpu || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">RAM</span><span class="stat-value">${healthRes.ram || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Disk</span><span class="stat-value">${healthRes.disk || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-value">${healthRes.uptime || 'N/A'}</span></div>
-        </div>
-        <div class="card">
-          <div class="card-title">Agent Overview</div>
-          <div class="stat-row"><span class="stat-label">Model</span><span class="stat-value">${agentRes.ok ? (agentRes.model || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Provider</span><span class="stat-value">${agentRes.ok ? (agentRes.provider || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Gateway</span><span class="stat-value ${agentRes.ok && agentRes.gatewayStatus?.includes('running') ? 'status-ok' : 'status-off'}">${agentRes.ok ? (agentRes.gatewayStatus || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">API Keys</span><span class="stat-value">${agentRes.ok ? `${agentRes.apiKeys?.active || 0}/${agentRes.apiKeys?.total || 0} active` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Platforms</span><span class="stat-value">${agentRes.ok ? (agentRes.platforms?.filter(p => p.configured).map(p => p.name).join(', ') || 'None') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Cron</span><span class="stat-value">${cronRes?.jobs?.length || 0} jobs</span></div>
-          <div class="stat-row"><span class="stat-label">Sessions</span><span class="stat-value">${agentRes.ok ? `${agentRes.activeSessions || 0} active` : 'N/A'}</span></div>
-        </div>
-      `;
-    }
+    cardsEl.innerHTML = `
+      <div class="card">
+        <div class="card-title">Agent Overview</div>
+        <div class="stat-row"><span class="stat-label">Model</span><span class="stat-value">${agentRes.ok ? (agentRes.model || 'N/A') : 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">Provider</span><span class="stat-value">${agentRes.ok ? (agentRes.provider || 'N/A') : 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">Gateway</span><span class="stat-value ${agentRes.ok && agentRes.gatewayStatus?.includes('running') ? 'status-ok' : 'status-off'}">${agentRes.ok ? (agentRes.gatewayStatus || 'N/A') : 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">API Keys</span><span class="stat-value">${agentRes.ok ? `${agentRes.apiKeys?.active || 0}/${agentRes.apiKeys?.total || 0} active` : 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">Platforms</span><span class="stat-value">${agentRes.ok ? (agentRes.platforms?.filter(p => p.configured).map(p => p.name).join(', ') || 'None') : 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">Cron</span><span class="stat-value">${cronRes?.jobs?.length || 0} jobs</span></div>
+        <div class="stat-row"><span class="stat-label">Sessions</span><span class="stat-value">${agentRes.ok ? `${agentRes.activeSessions || 0} active` : 'N/A'}</span></div>
+      </div>
+    `;
 
     // Row 2: Gateways (update only this card, don't replace entire grid)
     const profiles = profilesRes.ok && profilesRes.profiles ? profilesRes.profiles : [];
