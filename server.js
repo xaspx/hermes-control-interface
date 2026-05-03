@@ -357,6 +357,32 @@ function getGatewayBase(profile) {
   return `http://127.0.0.1:${port}`;
 }
 
+// Probe gateway health endpoint directly (works without systemd)
+// Returns { ok: boolean, managedBy: 'api' | 'systemd' | 'unknown' }
+async function probeGatewayHealth(profile) {
+  const base = getGatewayBase(profile);
+  if (base) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(`${base}/health`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return { ok: data.status === 'ok' || res.status === 200, managedBy: 'api', port: gatewayPorts[profile] || gatewayPorts['default'] };
+      }
+    } catch {}
+  }
+  // Fallback: check systemctl
+  try {
+    const SYSTEMD_USER_FLAG = process.getuid?.() === 0 ? '' : '--user ';
+    const svc = `hermes-gateway${profile !== 'default' ? `-${profile}` : ''}`;
+    const check = await shell(`systemctl ${SYSTEMD_USER_FLAG} is-active ${svc} 2>/dev/null || echo inactive`);
+    if (check.trim() === 'active') return { ok: true, managedBy: 'systemd' };
+  } catch {}
+  return { ok: false, managedBy: base ? 'api' : 'unknown' };
+}
+
 // Read default model from profile config.yaml
 function getDefaultModel(profile) {
   const baseHermesHome = path.join(os.homedir(), '.hermes');
@@ -2129,11 +2155,13 @@ app.get('/api/agent/status', requireAuth, async (req, res) => {
     // Parse key fields
     const model = grab('Model');
     const provider = grab('Provider');
-    // Gateway status — check systemd (user-level for non-root, system-level for root)
+    // Gateway status — probe API first, systemctl fallback
     let gatewayStatus = 'unknown';
+    let gatewayManagedBy = 'unknown';
     try {
-      const gwCheck = await shell(`systemctl ${SYSTEMD_USER_FLAG} is-active hermes-gateway 2>/dev/null || systemctl ${SYSTEMD_USER_FLAG} is-active hermes-gateway-* 2>/dev/null | head -1`, '5s');
-      gatewayStatus = gwCheck.trim() === 'active' ? 'running' : 'stopped';
+      const probe = await probeGatewayHealth('default');
+      gatewayStatus = probe.ok ? 'running' : 'stopped';
+      gatewayManagedBy = probe.managedBy;
     } catch {
       gatewayStatus = grab('Status');
     }
@@ -2175,6 +2203,7 @@ app.get('/api/agent/status', requireAuth, async (req, res) => {
       ok: true,
       model, provider,
       gatewayStatus,
+      gatewayManagedBy,
       activeSessions: parseInt(activeSessions) || 0,
       scheduledJobs: parseInt(jobs) || 0,
       apiKeys,
@@ -2305,7 +2334,34 @@ app.get('/api/gateway/:profile', requireAuth, async (req, res) => {
   if (!profile) return res.status(400).json({ error: 'invalid profile name' });
   const svcs = getGatewayServiceName(profile);
   try {
-    // Try primary first, fallback to alternate
+    // Probe API health first, systemctl as fallback
+    const probe = await probeGatewayHealth(profile);
+    
+    // If API probe succeeded, use that as primary signal
+    if (probe.managedBy === 'api' && probe.ok) {
+      // Still get systemctl info for display if available
+      let systemdInfo = { enabled: false, status: 'not managed by systemd' };
+      try {
+        const [isEnabled, status] = await Promise.all([
+          shell(`systemctl ${SYSTEMD_USER_FLAG} is-enabled ${svcs.primary} 2>/dev/null || echo disabled`),
+          shell(`systemctl ${SYSTEMD_USER_FLAG} status ${svcs.primary} 2>/dev/null | head -10`),
+        ]);
+        systemdInfo = { enabled: isEnabled.trim() === 'enabled', status: status.trim() };
+      } catch {}
+      
+      return res.json({
+        ok: true,
+        profile,
+        service: `gateway-api:${probe.port}`,
+        active: true,
+        enabled: true, // if API responds, it's effectively enabled
+        managedBy: 'api',
+        status: `API healthy on port ${probe.port}`,
+        systemd: systemdInfo,
+      });
+    }
+    
+    // Fallback to systemctl
     const svc = svcs.primary;
     const [isActive, isEnabled, status] = await Promise.all([
       shell(`systemctl ${SYSTEMD_USER_FLAG} is-active ${svc} 2>/dev/null || systemctl ${SYSTEMD_USER_FLAG} is-active ${svcs.bare === svc ? svcs.profiled : svcs.bare} 2>/dev/null || echo inactive`),
@@ -2318,10 +2374,11 @@ app.get('/api/gateway/:profile', requireAuth, async (req, res) => {
       service: svc,
       active: isActive.trim() === 'active',
       enabled: isEnabled.trim() === 'enabled',
+      managedBy: 'systemd',
       status: status.trim(),
     });
   } catch (e) {
-    res.json({ ok: true, profile, service: svc, active: false, enabled: false, status: 'not installed' });
+    res.json({ ok: true, profile, service: svcs.primary, active: false, enabled: false, managedBy: 'unknown', status: 'not installed' });
   }
 });
 
@@ -2472,14 +2529,30 @@ app.get('/api/gateway/:profile/health', requireAuth, async (req, res) => {
       }
     }
 
-    // Check 2: Gateway process running
+    // Check 2: Gateway process running — API probe first, systemctl fallback
     let gatewayRunning = false;
-    try {
-      const svcName = `hermes-gateway-${profile}`;
-      const status = (await shell(`systemctl is-active ${svcName} 2>&1`, '5s')).trim();
-      gatewayRunning = status === 'active';
-      checks.service_status = status;
-    } catch {}
+    let managedBy = 'unknown';
+    if (port) {
+      try {
+        const healthRes = await fetch(`http://127.0.0.1:${port}/health`, {
+          signal: AbortSignal.timeout(3000)
+        });
+        const data = await healthRes.json().catch(() => ({}));
+        gatewayRunning = healthRes.ok && (data.status === 'ok' || healthRes.status === 200);
+        managedBy = 'api';
+        checks.service_status = gatewayRunning ? 'api-healthy' : 'api-unhealthy';
+      } catch {}
+    }
+    if (!gatewayRunning) {
+      // Fallback: systemctl
+      try {
+        const svcName = `hermes-gateway-${profile}`;
+        const status = (await shell(`systemctl is-active ${svcName} 2>&1`, '5s')).trim();
+        gatewayRunning = status === 'active';
+        if (gatewayRunning) managedBy = 'systemd';
+        checks.service_status = status;
+      } catch {}
+    }
     if (!gatewayRunning) {
       // Fallback: check if something is listening on the port
       if (port) {
@@ -2523,9 +2596,10 @@ app.get('/api/gateway/:profile/health', requireAuth, async (req, res) => {
       profile,
       port: port || null,
       healthy,
+      managedBy,
       checks,
       issues,
-      gatewayMode: healthy ? 'Gateway API (fast)' : 'CLI fallback (slow)',
+      gatewayMode: healthy ? `Gateway API (${managedBy})` : 'CLI fallback (slow)',
     });
   } catch (e) {
     res.json({ ok: false, error: e.message });
