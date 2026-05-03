@@ -2294,15 +2294,10 @@ async function loadHome(container) {
         <button class="btn btn-ghost" onclick="loadHome(document.querySelector('.page.active'))">↻ Refresh</button>
       </div>
     </div>
-    <div class="card-grid" id="home-cards">
+    <div class="card-grid" id="home-cards" style="grid-template-columns:repeat(3,1fr);">
       <div class="card"><div class="card-title">Agent Overview</div><div class="loading">Loading</div></div>
-    </div>
-    <div class="card-grid" id="home-bottom" style="margin-top:16px;">
       <div class="card" id="home-gateways"><div class="card-title">Gateways</div><div class="loading">Loading</div></div>
-      <div class="card">
-        <div class="card-title">Hermes Auth</div>
-        <div id="home-auth-list"><div class="loading">Loading auth...</div></div>
-      </div>
+      <div class="card"><div class="card-title">Hermes Auth</div><div id="home-auth-list"><div class="loading">Loading auth...</div></div></div>
     </div>
   `;
 
