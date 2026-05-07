@@ -272,6 +272,9 @@ async function loadPage(page, params = {}) {
       case 'skills':
         await loadSkills(container);
         break;
+      case 'workflows':
+        await loadWorkflows(container);
+        break;
       case 'maintenance':
         await loadMaintenance(container);
         break;
@@ -5797,6 +5800,156 @@ window.markAllNotifRead = async function() {
   try { await api('/api/notifications/clear', { method: 'POST' }); } catch {}
   state.notifDisplayLimit = 5;
   renderNotifications();
+};
+
+
+// ============================================
+// Workflows
+// ============================================
+function workflowStatusClass(status) {
+  if (status === 'ok') return 'status-ok';
+  if (status === 'stale_warning' || status === 'missing_runbook' || status === 'missing_cron') return 'status-warn';
+  if (status === 'active_failure') return 'status-err';
+  return 'status-off';
+}
+
+function formatWorkflowStatus(status) {
+  return String(status || 'unknown').replace(/_/g, ' ');
+}
+
+function renderWorkflowSummary(summary = {}) {
+  const items = [
+    ['Total', summary.total || 0, 'status-off'],
+    ['OK', summary.ok || 0, 'status-ok'],
+    ['Warnings', (summary.stale_warning || 0) + (summary.missing_runbook || 0) + (summary.missing_cron || 0), 'status-warn'],
+    ['Failures', summary.active_failure || 0, 'status-err'],
+  ];
+  return items.map(([label, value, cls]) => `
+    <div class="card workflow-summary-card">
+      <div class="card-title">${escapeHtml(label)}</div>
+      <div class="workflow-summary-value ${cls}">${escapeHtml(value)}</div>
+    </div>
+  `).join('');
+}
+
+function renderWorkflowRows(workflows = []) {
+  if (!workflows.length) {
+    return '<div class="empty">No workflow definitions found in docs/workflows/definitions.</div>';
+  }
+  return `
+    <div class="table-wrap">
+      <table class="data-table workflow-table">
+        <thead>
+          <tr>
+            <th>Workflow</th>
+            <th>Status</th>
+            <th>Schedule</th>
+            <th>Cron</th>
+            <th>Artifacts</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${workflows.map((workflow) => `
+            <tr>
+              <td>
+                <div class="workflow-name">${escapeHtml(workflow.name || workflow.id)}</div>
+                <div class="workflow-muted">${escapeHtml(workflow.id)}</div>
+                ${workflow.businessGoal ? `<div class="workflow-goal">${escapeHtml(workflow.businessGoal)}</div>` : ''}
+              </td>
+              <td>
+                <span class="badge ${workflowStatusClass(workflow.status)}">${escapeHtml(formatWorkflowStatus(workflow.status))}</span>
+                ${(workflow.warnings || []).slice(0, 2).map((warning) => `<div class="workflow-warning">${escapeHtml(warning)}</div>`).join('')}
+              </td>
+              <td>${escapeHtml(workflow.schedule || 'n/a')}</td>
+              <td>
+                ${workflow.cron ? `
+                  <div>${escapeHtml(workflow.cron.name || workflow.cron.id)}</div>
+                  <div class="workflow-muted">${escapeHtml(workflow.cron.id || '')} · ${escapeHtml(workflow.cron.status || 'unknown')}</div>
+                  <div class="workflow-muted">deliver: ${escapeHtml(workflow.cron.deliver || 'n/a')}</div>
+                ` : '<span class="workflow-muted">Not linked</span>'}
+              </td>
+              <td>
+                <div class="workflow-muted">definition: ${escapeHtml(workflow.definitionPath || 'n/a')}</div>
+                <div class="workflow-muted">runbook: ${escapeHtml(workflow.runbookPath || 'missing')}</div>
+                ${workflow.latestReportPath ? `<div class="workflow-muted">report: ${escapeHtml(workflow.latestReportPath)}</div>` : ''}
+              </td>
+              <td><button class="btn btn-ghost btn-sm" onclick="window.showWorkflowDetail('${escapeHtml(workflow.id)}')">Details</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function loadWorkflows(container) {
+  const res = await api('/api/workflows');
+  if (!res.ok) {
+    container.innerHTML = `<div class="empty">Failed to load workflows: ${escapeHtml(res.error || 'unknown error')}</div>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1>Workflows</h1>
+        <p class="page-subtitle">Read-only Mira workflow inventory from MiraRepo definitions, runbooks, reports, and Hermes cron.</p>
+      </div>
+      <button class="btn btn-ghost" onclick="navigate('workflows')">↻ Refresh</button>
+    </div>
+    <div class="workflow-source">Source: ${escapeHtml(res.repoDir || '')}</div>
+    <div class="card-grid workflow-summary-grid">${renderWorkflowSummary(res.summary)}</div>
+    ${renderWorkflowRows(res.workflows || [])}
+  `;
+}
+
+window.showWorkflowDetail = async function(id) {
+  const res = await api(`/api/workflows/${encodeURIComponent(id)}`);
+  if (!res.ok) {
+    showToast(`Failed to load workflow: ${res.error || 'unknown error'}`, 'error');
+    return;
+  }
+  const workflow = res.workflow || {};
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-card workflow-detail-modal">
+      <div class="modal-title">${escapeHtml(workflow.name || workflow.id)}</div>
+      <div class="workflow-muted">${escapeHtml(workflow.id || '')}</div>
+      <div class="workflow-detail-grid">
+        <div><strong>Status</strong><br><span class="badge ${workflowStatusClass(workflow.status)}">${escapeHtml(formatWorkflowStatus(workflow.status))}</span></div>
+        <div><strong>Schedule</strong><br>${escapeHtml(workflow.schedule || 'n/a')}</div>
+        <div><strong>Risk</strong><br>${escapeHtml(workflow.riskLevel || 'unknown')}</div>
+        <div><strong>Cron</strong><br>${workflow.cron ? `${escapeHtml(workflow.cron.name || workflow.cron.id)}<br><span class="workflow-muted">${escapeHtml(workflow.cron.id || '')}</span>` : 'Not linked'}</div>
+      </div>
+      ${(workflow.warnings || []).length ? `<div class="workflow-warning-block">${(workflow.warnings || []).map((w) => `<div>⚠ ${escapeHtml(w)}</div>`).join('')}</div>` : ''}
+      <div class="tabs workflow-detail-tabs">
+        <button class="tab active" data-target="definition">Definition</button>
+        <button class="tab" data-target="runbook">Runbook</button>
+        <button class="tab" data-target="report">Latest Report</button>
+      </div>
+      <pre id="workflow-detail-body" class="workflow-detail-body">${escapeHtml(workflow.definitionRaw || '')}</pre>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const body = overlay.querySelector('#workflow-detail-body');
+  const payloads = {
+    definition: workflow.definitionRaw || '',
+    runbook: workflow.runbookRaw || 'Runbook is missing.',
+    report: workflow.latestReportRaw || 'No report found.',
+  };
+  overlay.querySelectorAll('.workflow-detail-tabs .tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      overlay.querySelectorAll('.workflow-detail-tabs .tab').forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      body.textContent = payloads[tab.dataset.target] || '';
+    });
+  });
 };
 
 // ============================================

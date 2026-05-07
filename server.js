@@ -17,6 +17,11 @@ const {
   mergeSessionsFromSources,
   parseHermesSessionsList,
 } = require('./lib/session-list');
+const {
+  buildWorkflowIndex,
+  getWorkflowDetail,
+  resolveMiraRepoDir,
+} = require('./lib/workflows');
 
 // ── TUI Gateway Bridge ──
 const { getBridge, killAllBridges } = require('./lib/tui-gateway-bridge');
@@ -1211,6 +1216,11 @@ function parseHermesCronList(raw) {
       continue;
     }
     if (!current) continue;
+    const deliveryFailed = trimmed.match(/Delivery failed:\s*(.*)$/i);
+    if (deliveryFailed) {
+      current.lastDeliveryError = deliveryFailed[1].trim();
+      continue;
+    }
     const kv = trimmed.match(/^([A-Za-z ]+):\s*(.*)$/);
     if (!kv) continue;
     const key = kv[1].toLowerCase();
@@ -1219,8 +1229,14 @@ function parseHermesCronList(raw) {
     else if (key === 'schedule') current.schedule = value || 'n/a';
     else if (key === 'repeat') current.repeat = value || null;
     else if (key === 'next run') current.nextRun = value || null;
-    else if (key === 'last run') current.lastRun = value || null;
+    else if (key === 'last run') {
+      current.lastRun = value || null;
+      const statusMatch = value.match(/\s+(ok|failed|failure|error|cancelled|timeout)\s*$/i);
+      if (statusMatch) current.lastStatus = statusMatch[1].toLowerCase();
+    }
     else if (key === 'deliver') current.deliver = value || 'n/a';
+    else if (key === 'last status') current.lastStatus = value || null;
+    else if (key === 'last delivery error') current.lastDeliveryError = value || null;
   }
   flush();
   return jobs;
@@ -2791,6 +2807,29 @@ app.post('/api/cron/:action', requireAuth, requireCsrf, requirePerm('cron.manage
     return res.json(result);
   } catch (error) {
     return res.status(error.statusCode || 400).json({ error: error.message || 'cron action failed' });
+  }
+});
+
+app.get('/api/workflows', requireAuth, async (req, res) => {
+  try {
+    const repoDir = resolveMiraRepoDir(req.query.repoDir || process.env.MIRA_REPO_DIR);
+    const cronJobsData = await getCronJobs();
+    const result = buildWorkflowIndex({ repoDir, cronJobs: cronJobsData });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'failed to load workflows' });
+  }
+});
+
+app.get('/api/workflows/:id', requireAuth, async (req, res) => {
+  try {
+    const repoDir = resolveMiraRepoDir(req.query.repoDir || process.env.MIRA_REPO_DIR);
+    const cronJobsData = await getCronJobs();
+    const workflow = getWorkflowDetail({ repoDir, id: req.params.id, cronJobs: cronJobsData });
+    if (!workflow) return res.status(404).json({ ok: false, error: 'workflow not found' });
+    return res.json({ ok: true, workflow });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'failed to load workflow' });
   }
 });
 
