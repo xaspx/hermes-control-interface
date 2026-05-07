@@ -87,26 +87,40 @@ function calculateCost(model, inputTokens, outputTokens, cacheReadTokens = 0, bi
 }
 
 // Async shell execution utility (non-blocking)
+function parseShellTimeout(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const raw = String(value || '8s').trim();
+  const match = raw.match(/^(\d+)(ms|s|m)?$/i);
+  if (!match) return 8000;
+  const amount = Number(match[1]);
+  const unit = (match[2] || 'ms').toLowerCase();
+  if (unit === 'm') return amount * 60_000;
+  if (unit === 's') return amount * 1_000;
+  return amount;
+}
+
 function shell(cmd, timeout = '8s') {
   return new Promise((resolve) => {
-    execFile('bash', ['-lc', `timeout ${timeout} ${cmd} 2>&1`], {
+    execFile('bash', ['-lc', `${cmd} 2>&1`], {
       encoding: 'utf8',
       maxBuffer: 64 * 1024,
-    }, (err, stdout) => {
-      resolve(err ? '' : stdout);
+      timeout: parseShellTimeout(timeout),
+    }, (err, stdout, stderr) => {
+      resolve((stdout || stderr || '').trim());
     });
   });
 }
 
 // Safer execution — no bash interpretation, direct args
+// Optional stdin: pipe data to the process (e.g. 'y' for confirmation prompts).
+// Prefer the venv-installed Hermes binary so LaunchAgent environments do not depend on shell PATH.
 const HERMES_CLI = process.env.HERMES_CLI
-  || path.join(os.homedir(), '.hermes', 'hermes-agent', 'venv', 'bin', 'hermes')
-  || 'hermes';
+  || path.join(os.homedir(), '.hermes', 'hermes-agent', 'venv', 'bin', 'hermes');
 
-function execHermes(args, timeout = 30000) {
+function execHermes(args, timeout = 30000, stdin = null) {
   const command = fs.existsSync(HERMES_CLI) ? HERMES_CLI : 'hermes';
   return new Promise((resolve) => {
-    execFile(command, args, {
+    const proc = execFile(command, args, {
       encoding: 'utf8',
       maxBuffer: 64 * 1024,
       timeout,
@@ -115,6 +129,10 @@ function execHermes(args, timeout = 30000) {
       const output = err ? (stdout + '\n' + stderr) : stdout;
       resolve(output);
     });
+    if (stdin && proc.stdin) {
+      proc.stdin.write(stdin);
+      proc.stdin.end();
+    }
   });
 }
 
@@ -360,6 +378,32 @@ function getGatewayBase(profile) {
   const port = gatewayPorts[profile] || gatewayPorts['default'];
   if (!port) return null; // no gateway api available
   return `http://127.0.0.1:${port}`;
+}
+
+// Probe gateway health endpoint directly (works without systemd)
+// Returns { ok: boolean, managedBy: 'api' | 'systemd' | 'unknown' }
+async function probeGatewayHealth(profile) {
+  const base = getGatewayBase(profile);
+  if (base) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(`${base}/health`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return { ok: data.status === 'ok' || res.status === 200, managedBy: 'api', port: gatewayPorts[profile] || gatewayPorts['default'] };
+      }
+    } catch {}
+  }
+  // Fallback: check systemctl
+  try {
+    const SYSTEMD_USER_FLAG = process.getuid?.() === 0 ? '' : '--user ';
+    const svc = `hermes-gateway${profile !== 'default' ? `-${profile}` : ''}`;
+    const check = await shell(`systemctl ${SYSTEMD_USER_FLAG} is-active ${svc} 2>/dev/null || echo inactive`);
+    if (check.trim() === 'active') return { ok: true, managedBy: 'systemd' };
+  } catch {}
+  return { ok: false, managedBy: base ? 'api' : 'unknown' };
 }
 
 // Read default model from profile config.yaml
@@ -994,6 +1038,8 @@ function appendTerminalOutput(chunk) {
 
 function ensureTerminalSession() {
   if (terminalSession.proc && terminalSession.ready) return terminalSession;
+  // If terminal previously failed, don't retry — return degraded session
+  if (terminalSession._spawnFailed) return terminalSession;
 
   const REAL_HOME = os.homedir();
   const env = {
@@ -1010,13 +1056,22 @@ function ensureTerminalSession() {
     PATH: process.env.PATH,
   };
 
-  const proc = pty.spawn('bash', ['--noprofile', '--norc', '-i'], {
-    cwd: PROJECT_ROOT,
-    env,
-    cols: terminalSession.cols,
-    rows: terminalSession.rows,
-    name: 'xterm-256color',
-  });
+  let proc;
+  try {
+    proc = pty.spawn('bash', ['--noprofile', '--norc', '-i'], {
+      cwd: PROJECT_ROOT,
+      env,
+      cols: terminalSession.cols,
+      rows: terminalSession.rows,
+      name: 'xterm-256color',
+    });
+  } catch (e) {
+    console.error('[HCI] PTY spawn failed — terminal disabled:', e.message);
+    terminalSession._spawnFailed = true;
+    terminalSession.lastError = 'PTY unavailable: ' + e.message;
+    terminalSession.buffer = '';
+    return terminalSession;
+  }
 
   terminalSession.proc = proc;
   terminalSession.startedAt = Date.now();
@@ -2020,9 +2075,14 @@ app.post('/api/notifications/clear', requireAuth, requireCsrf, (req, res) => {
 // ============================================
 app.get('/api/system/health', requireAuth, async (req, res) => {
   try {
-    const [cpu, ram, disk, version, agents, sessions] = await Promise.all([
-      shell("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"),
-      shell("free -m | awk '/Mem:/ {printf \"%d/%dMB (%.0f%%)\", $3, $2, $3/$2*100}'"),
+    // Use os module for CPU/RAM (cross-platform, no top/free dependency)
+    const memTotalMb = Math.round(os.totalmem() / 1024 / 1024);
+    const memUsedMb = Math.round((os.totalmem() - os.freemem()) / 1024 / 1024);
+    const cpuCores = Math.max(1, os.cpus().length || 1);
+    const load1 = os.loadavg()[0] || 0;
+    const cpuPct = Math.min(100, Math.max(0, Math.round((load1 / cpuCores) * 100)));
+
+    const [disk, version, agents, sessions] = await Promise.all([
       shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
       shell("hermes version 2>&1 | head -1"),
       shell("hermes profile list 2>&1 | wc -l"),
@@ -2036,8 +2096,8 @@ app.get('/api/system/health', requireAuth, async (req, res) => {
     const uptime = upDays > 0 ? `${upDays}d ${upHrs}h ${upMins}m` : upHrs > 0 ? `${upHrs}h ${upMins}m` : `${upMins}m`;
     res.json({
       ok: true,
-      cpu: cpu.trim() || 'N/A',
-      ram: ram.trim() || 'N/A',
+      cpu: `${cpuPct}% (${load1.toFixed(2)} load / ${cpuCores} cores)`,
+      ram: `${memUsedMb}/${memTotalMb}MB (${Math.round((memUsedMb / memTotalMb) * 100)}%)`,
       disk: disk.trim() || 'N/A',
       uptime,
       hermes_version: version.trim() || 'N/A',
@@ -2054,11 +2114,16 @@ app.get('/api/system/health', requireAuth, async (req, res) => {
 // System Monitoring — detailed metrics
 app.get('/api/monitoring', requireAuth, async (req, res) => {
   try {
-    const [cpu, mem, disk, loadAvg, netio, processes, uptime, version] = await Promise.all([
-      shell("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"),
-      shell("free -m | awk '/Mem:/ {printf \"%d/%dMB (%.1f%%)\", $3, $2, $3/$2*100}'"),
+    // Use os module for CPU/RAM (cross-platform)
+    const memTotalMb = Math.round(os.totalmem() / 1024 / 1024);
+    const memUsedMb = Math.round((os.totalmem() - os.freemem()) / 1024 / 1024);
+    const cpuCores = Math.max(1, os.cpus().length || 1);
+    const loadAvg = os.loadavg();
+    const load1 = loadAvg[0] || 0;
+    const cpuPct = Math.min(100, Math.max(0, Math.round((load1 / cpuCores) * 100)));
+
+    const [disk, netio, processes, uptime, version] = await Promise.all([
       shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
-      shell("cat /proc/loadavg | awk '{print $1\", \"$2\", \"$3}'"),
       shell("cat /proc/net/dev | awk 'NR==3 {print $1, $9}'"),
       shell("ps aux --no-headers | wc -l"),
       shell("uptime | awk -F'up ' '{split($2,a,\" user\");print a[1]\", \"$3}'"),
@@ -2071,20 +2136,18 @@ app.get('/api/monitoring', requireAuth, async (req, res) => {
     const netBytes = netParts[1] || '0';
     const netPackets = netParts[2] || '0';
 
-    // CPU percentage (already in format like "12.5%")
-    const cpuPct = (cpu.trim() || 'N/A').replace(/,/g, '');
-
     // Memory usage
-    const memInfo = mem.trim() || 'N/A';
+    const memInfo = `${memUsedMb}/${memTotalMb}MB (${Math.round((memUsedMb / memTotalMb) * 100)}%)`;
+    const memPctNum = Math.round((memUsedMb / memTotalMb) * 100);
 
     // Disk usage
     const diskInfo = disk.trim() || 'N/A';
+    const diskPctMatch = diskInfo.match(/\((\d+)%\)/);
+    const diskPctNum = diskPctMatch ? parseFloat(diskPctMatch[1]) : 0;
 
-    // Load averages
-    const loadParts = (loadAvg.trim() || '0, 0, 0').split(',').map(l => l.trim());
-    const load1 = loadParts[0] || '0';
-    const load5 = loadParts[1] || '0';
-    const load15 = loadParts[2] || '0';
+    // Load averages (already computed from os.loadavg())
+    const load5 = loadAvg[1]?.toFixed(2) || '0';
+    const load15 = loadAvg[2]?.toFixed(2) || '0';
 
     // Process count
     const procCount = parseInt(processes.trim()) || 0;
@@ -2104,10 +2167,13 @@ app.get('/api/monitoring', requireAuth, async (req, res) => {
 
     res.json({
       ok: true,
-      cpu: cpuPct,
+      cpu: `${cpuPct}%`,
       memory: memInfo,
       disk: diskInfo,
-      load: { avg1: load1, avg5: load5, avg15: load15 },
+      cpu_pct: cpuPct,
+      mem_pct: memPctNum,
+      disk_pct: diskPctNum,
+      load: { avg1: load1.toFixed(2), avg5: load5, avg15: load15 },
       network: { interface: netInterface, bytes: netBytes, packets: netPackets },
       processes: procCount,
       uptime: upInfo,
@@ -2137,11 +2203,13 @@ app.get('/api/agent/status', requireAuth, async (req, res) => {
     // Parse key fields
     const model = grab('Model');
     const provider = grab('Provider');
-    // Gateway status — check systemd (user-level for non-root, system-level for root)
+    // Gateway status — probe API first, systemctl fallback
     let gatewayStatus = 'unknown';
+    let gatewayManagedBy = 'unknown';
     try {
-      const gwCheck = await shell(`systemctl ${SYSTEMD_USER_FLAG} is-active hermes-gateway 2>/dev/null || systemctl ${SYSTEMD_USER_FLAG} is-active hermes-gateway-* 2>/dev/null | head -1`, '5s');
-      gatewayStatus = gwCheck.trim() === 'active' ? 'running' : 'stopped';
+      const probe = await probeGatewayHealth('default');
+      gatewayStatus = probe.ok ? 'running' : 'stopped';
+      gatewayManagedBy = probe.managedBy;
     } catch {
       gatewayStatus = grab('Status');
     }
@@ -2183,6 +2251,7 @@ app.get('/api/agent/status', requireAuth, async (req, res) => {
       ok: true,
       model, provider,
       gatewayStatus,
+      gatewayManagedBy,
       activeSessions: parseInt(activeSessions) || 0,
       scheduledJobs: parseInt(jobs) || 0,
       apiKeys,
@@ -2236,13 +2305,21 @@ function parseHermesProfileList(raw) {
   for (const line of dataLines) {
     const active = line.includes('◆');
     const cleaned = line.replace(/[◆]+$/, '').replace(/\s*◆\s*/, '').trimEnd();
-    const parts = cleaned.split(/\s{2,}/).map((p) => p.trim()).filter(Boolean);
+    const parts = cleaned.split(/\s+/).map((p) => p.trim()).filter(Boolean);
     if (parts.length < 3) continue;
+    const gatewayIndex = parts.findIndex((p) => /^(running|stopped)$/i.test(p));
+    if (gatewayIndex < 2) continue;
+    const name = parts.slice(0, gatewayIndex - 1).join(' ');
+    const model = parts[gatewayIndex - 1];
+    const gateway = parts[gatewayIndex].toLowerCase();
+    const alias = parts[gatewayIndex + 1] && parts[gatewayIndex + 1] !== '—'
+      ? parts.slice(gatewayIndex + 1).join(' ')
+      : null;
     profiles.push({
-      name: parts[0] || '',
-      model: parts[1] || '—',
-      gateway: (parts[2] || '').toLowerCase(),
-      alias: parts[3] && parts[3] !== '—' ? parts[3] : null,
+      name: name || '',
+      model: model || '—',
+      gateway,
+      alias,
       active,
     });
   }
@@ -2256,6 +2333,15 @@ async function getProfiles() {
   console.log('[DEBUG getProfiles] raw shell output:', JSON.stringify(raw));
   if (raw) {
     const data = parseHermesProfileList(raw);
+    // Fix: hermes profile list doesn't update ◆ marker after `profile use`
+    // Read actual active profile from ~/.hermes/active_profile
+    try {
+      const activeProfilePath = path.join(os.homedir(), '.hermes', 'active_profile');
+      const actualActive = fs.existsSync(activeProfilePath)
+        ? fs.readFileSync(activeProfilePath, 'utf8').trim()
+        : 'default';
+      data.forEach(p => { p.active = p.name === actualActive; });
+    } catch {}
     console.log('[DEBUG getProfiles] parsed:', JSON.stringify(data));
     getProfiles.cache = { at: now, data };
     return data;
@@ -2304,7 +2390,34 @@ app.get('/api/gateway/:profile', requireAuth, async (req, res) => {
   if (!profile) return res.status(400).json({ error: 'invalid profile name' });
   const svcs = getGatewayServiceName(profile);
   try {
-    // Try primary first, fallback to alternate
+    // Probe API health first, systemctl as fallback
+    const probe = await probeGatewayHealth(profile);
+
+    // If API probe succeeded, use that as primary signal
+    if (probe.managedBy === 'api' && probe.ok) {
+      // Still get systemctl info for display if available
+      let systemdInfo = { enabled: false, status: 'not managed by systemd' };
+      try {
+        const [isEnabled, status] = await Promise.all([
+          shell(`systemctl ${SYSTEMD_USER_FLAG} is-enabled ${svcs.primary} 2>/dev/null || echo disabled`),
+          shell(`systemctl ${SYSTEMD_USER_FLAG} status ${svcs.primary} 2>/dev/null | head -10`),
+        ]);
+        systemdInfo = { enabled: isEnabled.trim() === 'enabled', status: status.trim() };
+      } catch {}
+
+      return res.json({
+        ok: true,
+        profile,
+        service: `gateway-api:${probe.port}`,
+        active: true,
+        enabled: true, // if API responds, it's effectively enabled
+        managedBy: 'api',
+        status: `API healthy on port ${probe.port}`,
+        systemd: systemdInfo,
+      });
+    }
+
+    // Fallback to systemctl
     const svc = svcs.primary;
     const [isActive, isEnabled, status] = await Promise.all([
       shell(`systemctl ${SYSTEMD_USER_FLAG} is-active ${svc} 2>/dev/null || systemctl ${SYSTEMD_USER_FLAG} is-active ${svcs.bare === svc ? svcs.profiled : svcs.bare} 2>/dev/null || echo inactive`),
@@ -2317,10 +2430,11 @@ app.get('/api/gateway/:profile', requireAuth, async (req, res) => {
       service: svc,
       active: isActive.trim() === 'active',
       enabled: isEnabled.trim() === 'enabled',
+      managedBy: 'systemd',
       status: status.trim(),
     });
   } catch (e) {
-    res.json({ ok: true, profile, service: svc, active: false, enabled: false, status: 'not installed' });
+    res.json({ ok: true, profile, service: svcs.primary, active: false, enabled: false, managedBy: 'unknown', status: 'not installed' });
   }
 });
 
@@ -2471,14 +2585,30 @@ app.get('/api/gateway/:profile/health', requireAuth, async (req, res) => {
       }
     }
 
-    // Check 2: Gateway process running
+    // Check 2: Gateway process running — API probe first, systemctl fallback
     let gatewayRunning = false;
-    try {
-      const svcName = `hermes-gateway-${profile}`;
-      const status = (await shell(`systemctl is-active ${svcName} 2>&1`, '5s')).trim();
-      gatewayRunning = status === 'active';
-      checks.service_status = status;
-    } catch {}
+    let managedBy = 'unknown';
+    if (port) {
+      try {
+        const healthRes = await fetch(`http://127.0.0.1:${port}/health`, {
+          signal: AbortSignal.timeout(3000)
+        });
+        const data = await healthRes.json().catch(() => ({}));
+        gatewayRunning = healthRes.ok && (data.status === 'ok' || healthRes.status === 200);
+        managedBy = 'api';
+        checks.service_status = gatewayRunning ? 'api-healthy' : 'api-unhealthy';
+      } catch {}
+    }
+    if (!gatewayRunning) {
+      // Fallback: systemctl
+      try {
+        const svcName = `hermes-gateway-${profile}`;
+        const status = (await shell(`systemctl is-active ${svcName} 2>&1`, '5s')).trim();
+        gatewayRunning = status === 'active';
+        if (gatewayRunning) managedBy = 'systemd';
+        checks.service_status = status;
+      } catch {}
+    }
     if (!gatewayRunning) {
       // Fallback: check if something is listening on the port
       if (port) {
@@ -2522,9 +2652,10 @@ app.get('/api/gateway/:profile/health', requireAuth, async (req, res) => {
       profile,
       port: port || null,
       healthy,
+      managedBy,
       checks,
       issues,
-      gatewayMode: healthy ? 'Gateway API (fast)' : 'CLI fallback (slow)',
+      gatewayMode: healthy ? `Gateway API (${managedBy})` : 'CLI fallback (slow)',
     });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -3687,7 +3818,7 @@ app.post('/api/skills/uninstall', requireRole('admin'), requireCsrf, async (req,
     // Sanitize skill name — only allow safe characters to prevent command injection
     if (!/^[\w.\-]+$/.test(skill)) return res.status(400).json({ ok: false, error: 'invalid skill name' });
     const profArg = profile ? ['-p', sanitizeProfileName(profile)] : [];
-    const output = await shell(`echo y | hermes ${profArg.length ? `-p ${profArg[1]} ` : ''}skills uninstall ${skill} 2>&1`, 15000);
+    const output = await execHermes([...profArg, 'skills', 'uninstall', skill], 15000, 'y\n');
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -4655,6 +4786,95 @@ const server = (() => {
   });
   return server;
 })();
+
+// ── Setup Health Check ──
+// Validates HCI configuration: hermes CLI, gateway API, TUI bridge, config
+app.get('/api/setup/check', requireAuth, async (req, res) => {
+  const results = [];
+
+  // 1. Check hermes CLI available
+  try {
+    const out = await shell('which hermes 2>/dev/null || echo NOT_FOUND');
+    results.push({
+      check: 'hermes_cli',
+      label: 'Hermes CLI',
+      ok: out !== 'NOT_FOUND',
+      detail: out !== 'NOT_FOUND' ? out : 'hermes not on PATH',
+    });
+  } catch {
+    results.push({ check: 'hermes_cli', label: 'Hermes CLI', ok: false, detail: 'not found' });
+  }
+
+  // 2. Check gateway API reachable (only for running profiles)
+  const ports = gatewayPorts;
+  // Cross-reference with `hermes profile list` to find running gateways
+  let runningPorts = {};
+  try {
+    const profileOut = await shell('hermes profile list 2>/dev/null');
+    // Parse lines like: "◆default  model  running  —"
+    const runningProfiles = profileOut.split('\n')
+      .filter(l => l.includes('running') && !l.includes('Gateway'))
+      .map(l => l.trim().split(/\s+/)[0].replace('◆', ''));
+    for (const [name, port] of Object.entries(ports)) {
+      if (runningProfiles.includes(name)) runningPorts[name] = port;
+    }
+  } catch {
+    runningPorts = ports; // fallback: try all discovered ports
+  }
+  if (Object.keys(runningPorts).length > 0) {
+    const entries = Object.entries(runningPorts);
+    // Check all running gateway APIs
+    const portResults = await Promise.all(entries.map(async ([name, port]) => {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 3000);
+        const healthRes = await fetch(`http://127.0.0.1:${port}/health`, { signal: ctrl.signal });
+        clearTimeout(t);
+        return `${name}:${port} — ${healthRes.ok ? 'healthy' : healthRes.status}`;
+      } catch {
+        return `${name}:${port} — unreachable`;
+      }
+    }));
+    const allHealthy = portResults.every(r => r.includes('healthy'));
+    results.push({
+      check: 'gateway_api',
+      label: 'Gateway API',
+      ok: allHealthy,
+      detail: portResults.join(', '),
+    });
+  } else {
+    results.push({
+      check: 'gateway_api',
+      label: 'Gateway API',
+      ok: false,
+      detail: Object.keys(ports).length > 0
+        ? `ports discovered (${Object.values(ports).join(', ')}) but no running gateways`
+        : 'no gateway ports configured — chat uses CLI fallback',
+    });
+  }
+
+  // 3. Check Python bridge (TUI gateway)
+  const pythonRoot = process.env.HERMES_PYTHON_SRC_ROOT || path.join(os.homedir(), '.hermes', 'hermes-agent');
+  const tuiEntry = path.join(pythonRoot, 'tui_gateway', 'entry.py');
+  results.push({
+    check: 'tui_bridge',
+    label: 'TUI Python Bridge',
+    ok: fs.existsSync(tuiEntry),
+    detail: fs.existsSync(tuiEntry) ? `found at ${tuiEntry}` : `missing — expected at ${tuiEntry}`,
+  });
+
+  // 4. Check hermes config.yaml
+  const configPath = path.join(os.homedir(), '.hermes', 'config.yaml');
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    yaml.load(raw);
+    results.push({ check: 'hermes_config', label: 'Hermes Config', ok: true, detail: configPath });
+  } catch {
+    results.push({ check: 'hermes_config', label: 'Hermes Config', ok: false, detail: 'missing or invalid config.yaml' });
+  }
+
+  res.json({ ok: true, checks: results });
+});
 
 // ── WebSocket Chat Gateway Bridge ──
 // Proxies Gateway API /v1/responses via WebSocket for real-time event streaming.

@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
-import { resolve } from 'path';
+
+const backendUrl = process.env.HCI_BACKEND_URL || 'http://localhost:10272';
+const backendWsUrl = backendUrl.replace(/^http/, 'ws');
 
 export default defineConfig({
   root: 'src',
@@ -10,9 +12,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:10274',
+      '/api': backendUrl,
       '/ws': {
-        target: 'ws://localhost:10274',
+        target: backendWsUrl,
         ws: true,
       },
     },

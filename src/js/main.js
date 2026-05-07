@@ -131,6 +131,21 @@ function showApp() {
   wsClient.addEventListener('close', () => {
     state._wsConnected = false;
     updateWsConnectionUI(false);
+    // Unlock chat if disconnect happens mid-stream (debounced: once per 15s)
+    if (state._chatLock) {
+      state._chatLock = false;
+      const sendBtn = document.getElementById('chat-send-btn');
+      const stopBtn = document.getElementById('chat-stop-btn');
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = 'Send'; sendBtn.style.display = ''; }
+      if (stopBtn) stopBtn.style.display = 'none';
+      const cursors = document.querySelectorAll('.chat-cursor');
+      cursors.forEach(c => c.remove());
+      const now = Date.now();
+      if (!state._lastWsWarn || now - state._lastWsWarn > 15000) {
+        state._lastWsWarn = now;
+        showChatWarning('Connection lost — response may be incomplete');
+      }
+    }
   });
   if (wsClient.connected) {
     // Already connected (e.g. reconnect before showApp re-runs)
@@ -258,10 +273,6 @@ async function loadPage(page, params = {}) {
         break;
       case 'agents':
         await loadAgents(container);
-        break;
-      case 'mon':
-        // MON page merged into Home — redirect
-        navigate('home');
         break;
       case 'agent-detail':
         await loadAgentDetail(container, params);
@@ -453,6 +464,12 @@ async function loadChat(container) {
   const profileSelect = document.getElementById('chat-profile');
   if (profileSelect) profileSelect.value = defaultProfile;
 
+  // Restore last-used profile from localStorage
+  const lastProfile = localStorage.getItem('hci-chat-profile');
+  if (lastProfile && profiles.some(p => p.name === lastProfile)) {
+    profileSelect.value = lastProfile;
+  }
+
   // Cache profiles for the info panel
   _chatInfoProfiles = profiles;
 
@@ -465,6 +482,8 @@ async function loadChat(container) {
   // prompt the user to set it as their default agent.
   profileSelect?.addEventListener('change', async () => {
     const selected = profileSelect.value;
+    // Persist selection for page navigation
+    localStorage.setItem('hci-chat-profile', selected);
     const hermesDefault = state._defaultProfile || 'default';
     // Only prompt if: (1) not already the Hermes default, (2) no active session (new chat)
     if (selected !== hermesDefault && !state._currentChatSession) {
@@ -501,11 +520,9 @@ async function loadChat(container) {
           profileSelect.value = hermesDefault;
         }
       } else {
-        // User cancelled or overlay-clicked — revert to Hermes default (do NOT apply selected for new chats)
-        profileSelect.value = hermesDefault;
-        refreshChatSidebar();
+        // User cancelled — apply selection for this session only (don't persist as default)
+        updateChatAgentPanel().catch(() => {});
         updateGatewayBadge().catch(() => {});
-        return;
       }
     }
     refreshChatSidebar();
@@ -997,7 +1014,7 @@ async function updateChatAgentPanel() {
   // All agents compact list
   const agentItems = profiles.map(p => {
     const isRunning = p.gateway === 'running';
-    return `<div class="agent-list-item">
+    return `<div class="agent-list-item" onclick="switchChatProfile('${escapeHtml(p.name)}')" style="cursor:pointer;" title="Switch to ${escapeHtml(p.name)}">
       <span class="agent-list-dot ${isRunning ? 'running' : 'stopped'}"></span>
       <span class="agent-list-name">${escapeHtml(p.name)}</span>
       <span class="agent-list-model">${escapeHtml((p.model || '—').split('/').pop())}</span>
@@ -1006,6 +1023,14 @@ async function updateChatAgentPanel() {
   }).join('');
 
   body.innerHTML = currentCard + `<div class="agent-list">${agentItems}</div>`;
+}
+
+function switchChatProfile(name) {
+  const sel = document.getElementById('chat-profile');
+  if (sel) {
+    sel.value = name;
+    sel.dispatchEvent(new Event('change'));
+  }
 }
 
 // Stop active chat stream (Gateway API or CLI or WS)
@@ -1139,10 +1164,17 @@ async function sendChatMessage() {
         await sendViaWebSocket(text, profile, sessionId);
         return; // WS success — done
       } catch (wsErr) {
-        console.warn('[Chat] WS failed, falling back to CLI:', wsErr.message);
+        console.warn('[Chat] WS failed, trying Gateway API:', wsErr.message);
       }
     }
-    // Fallback to CLI (Gateway API chat endpoint not available in Hermes)
+    // Try Gateway API directly (fast, structured SSE events)
+    try {
+      await sendViaGatewayAPI(text, profile, sessionId, contentDiv, messagesDiv, startTime);
+      return;
+    } catch (gwErr) {
+      console.warn('[Chat] Gateway API failed, falling back to CLI:', gwErr.message);
+    }
+    // Last resort: raw CLI (slow, stdout parsing)
     await sendViaCLI(text, profile, sessionId, contentDiv, messagesDiv, startTime);
   } catch (cliErr) {
     console.error('[Chat] CLI failed:', cliErr.message);
@@ -1335,7 +1367,9 @@ function setupWsChatHandlers() {
         finalizeWsChat();
         break;
       case 'chat.error':
-        showChatError(msg.error);
+        // Bridge errors are recoverable — CLI fallback handles it.
+        // Show as warning, not fatal error.
+        showChatWarning(msg.error);
         break;
       case 'chat.clarify':
         showClarifyModal(msg.question, msg.choices, msg.request_id);
@@ -1358,10 +1392,13 @@ function setupWsChatHandlers() {
         console.log('[TUI] Gateway ready');
         break;
       case 'tui.stderr':
-        console.log('[TUI] stderr:', msg.line);
+        // Surface actionable TUI messages; filter routine noise
+        if (msg.line && !/(?:INFO|DEBUG|^\s*$)/.test(msg.line)) {
+          showChatWarning(msg.line);
+        }
         break;
       case 'tui.error':
-        console.error('[TUI] error:', msg.error);
+        showChatError('TUI gateway error: ' + (msg.error || 'unknown'));
         break;
     }
   });
@@ -1738,13 +1775,21 @@ function finalizeWsChat() {
 function showChatError(error) {
   const messagesDiv = document.getElementById('chat-messages');
   if (messagesDiv) {
-    messagesDiv.innerHTML += `<div class="chat-msg msg-system"><div class="msg-body" style="color:var(--error)">❌ ${escapeHtml(error)}</div></div>`;
+    messagesDiv.innerHTML += `<div class="chat-msg msg-system"><div class="msg-body" style="color:var(--red)">❌ ${escapeHtml(error)}</div></div>`;
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
   }
   const stopBtn = document.getElementById('chat-stop-btn');
   if (stopBtn) stopBtn.style.display = 'none';
   const sendBtn = document.getElementById('chat-send-btn');
   if (sendBtn) sendBtn.style.display = '';
+}
+
+function showChatWarning(msg) {
+  const messagesDiv = document.getElementById('chat-messages');
+  if (messagesDiv) {
+    messagesDiv.innerHTML += `<div class="chat-msg msg-system"><div class="msg-body" style="color:var(--amber)">⚠️ ${escapeHtml(msg)}</div></div>`;
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
 }
 
 // ── Send via WebSocket ──
@@ -1784,7 +1829,8 @@ async function sendViaWebSocket(text, profile, sessionId) {
         resolve();
       } else if (msg.type === 'chat.error') {
         wsClient.removeEventListener('message', onDone);
-        showChatError(msg.error);
+        // Recoverable — CLI fallback will handle this
+        showChatWarning(msg.error);
         reject(new Error(msg.error));
       }
     }
@@ -2301,81 +2347,33 @@ async function loadHome(container) {
         <button class="btn btn-ghost" onclick="loadHome(document.querySelector('.page.active'))">↻ Refresh</button>
       </div>
     </div>
-    <div class="card-grid" id="home-cards">
-      <div class="card"><div class="card-title">System Health</div><div class="loading">Loading</div></div>
-      <div class="card"><div class="card-title">Agent Overview</div><div class="loading">Loading</div></div>
-    </div>
-    <div class="card-grid" id="home-bottom" style="margin-top:16px;">
+    <div class="card-grid" id="home-cards" style="grid-template-columns:repeat(4,1fr);">
+      <div class="card" id="home-agent"><div class="card-title">Agent Overview</div><div class="loading">Loading</div></div>
       <div class="card" id="home-gateways"><div class="card-title">Gateways</div><div class="loading">Loading</div></div>
-      <div class="card">
-        <div class="card-title">Hermes Auth</div>
-        <div id="home-auth-list"><div class="loading">Loading auth...</div></div>
-      </div>
+      <div class="card"><div class="card-title">Hermes Auth</div><div id="home-auth-list"><div class="loading">Loading auth...</div></div></div>
+      <div class="card" id="home-setup"><div class="card-title">Setup Health</div><div class="loading">Checking...</div></div>
     </div>
   `;
 
   try {
-    const [monRes, profilesRes, agentRes, cronRes] = await Promise.all([
-      api('/api/monitoring'),
+    const [profilesRes, agentRes, cronRes] = await Promise.all([
       api('/api/profiles'),
       api('/api/agent/status'),
       api('/api/cron/list', { method: 'POST', body: '{}' }),
     ]);
 
-    // Row 1: System Health + Agent Overview (merged)
-    const cardsEl = document.getElementById('home-cards');
-    if (monRes.ok) {
-      const m = monRes;
-      cardsEl.innerHTML = `
-        <div class="card">
-          <div class="card-title">System Health</div>
-          <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value">${m.cpu || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">RAM</span><span class="stat-value">${m.memory || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Disk</span><span class="stat-value">${m.disk || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Load</span><span class="stat-value">${m.load ? `${m.load.avg1}, ${m.load.avg5}, ${m.load.avg15}` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Processes</span><span class="stat-value">${m.processes || 0}</span></div>
-          <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-value">${m.uptime || 'N/A'}</span></div>
-        </div>
-        <div class="card">
-          <div class="card-title">System Details</div>
-          <div class="stat-row"><span class="stat-label">Network</span><span class="stat-value">${m.network ? `${m.network.interface} (${formatNumber(m.network.bytes)}B)` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Node RSS</span><span class="stat-value">${m.node_memory ? `${m.node_memory.rss_mb} MB` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Heap Used</span><span class="stat-value">${m.node_memory ? `${m.node_memory.heap_used_mb}/${m.node_memory.heap_total_mb} MB` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Hermes</span><span class="stat-value">${m.hermes_version || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">HCI</span><span class="stat-value">${m.hci_version || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Node.js</span><span class="stat-value">${m.node_version || 'N/A'}</span></div>
-        </div>
-        <div class="card">
-          <div class="card-title">Agent Overview</div>
-          <div class="stat-row"><span class="stat-label">Model</span><span class="stat-value">${agentRes.ok ? (agentRes.model || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Provider</span><span class="stat-value">${agentRes.ok ? (agentRes.provider || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Gateway</span><span class="stat-value ${agentRes.ok && agentRes.gatewayStatus?.includes('running') ? 'status-ok' : 'status-off'}">${agentRes.ok ? (agentRes.gatewayStatus || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">API Keys</span><span class="stat-value">${agentRes.ok ? `${agentRes.apiKeys?.active || 0}/${agentRes.apiKeys?.total || 0} active` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Platforms</span><span class="stat-value">${agentRes.ok ? (agentRes.platforms?.filter(p => p.configured).map(p => p.name).join(', ') || 'None') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Cron</span><span class="stat-value">${cronRes?.jobs?.length || 0} jobs</span></div>
-          <div class="stat-row"><span class="stat-label">Sessions</span><span class="stat-value">${agentRes.ok ? `${agentRes.activeSessions || 0} active` : 'N/A'}</span></div>
-        </div>
-      `;
-    } else if (healthRes.ok) {
-      // Fallback to /api/system/health if /api/monitoring fails
-      cardsEl.innerHTML = `
-        <div class="card">
-          <div class="card-title">System Health</div>
-          <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value">${healthRes.cpu || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">RAM</span><span class="stat-value">${healthRes.ram || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Disk</span><span class="stat-value">${healthRes.disk || 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-value">${healthRes.uptime || 'N/A'}</span></div>
-        </div>
-        <div class="card">
-          <div class="card-title">Agent Overview</div>
-          <div class="stat-row"><span class="stat-label">Model</span><span class="stat-value">${agentRes.ok ? (agentRes.model || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Provider</span><span class="stat-value">${agentRes.ok ? (agentRes.provider || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Gateway</span><span class="stat-value ${agentRes.ok && agentRes.gatewayStatus?.includes('running') ? 'status-ok' : 'status-off'}">${agentRes.ok ? (agentRes.gatewayStatus || 'N/A') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">API Keys</span><span class="stat-value">${agentRes.ok ? `${agentRes.apiKeys?.active || 0}/${agentRes.apiKeys?.total || 0} active` : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Platforms</span><span class="stat-value">${agentRes.ok ? (agentRes.platforms?.filter(p => p.configured).map(p => p.name).join(', ') || 'None') : 'N/A'}</span></div>
-          <div class="stat-row"><span class="stat-label">Cron</span><span class="stat-value">${cronRes?.jobs?.length || 0} jobs</span></div>
-          <div class="stat-row"><span class="stat-label">Sessions</span><span class="stat-value">${agentRes.ok ? `${agentRes.activeSessions || 0} active` : 'N/A'}</span></div>
-        </div>
+    // Row 1: Agent Overview only (System Health/Details moved to Monitor page)
+    const agentCard = document.getElementById('home-agent');
+    if (agentCard) {
+      agentCard.innerHTML = `
+        <div class="card-title">Agent Overview</div>
+        <div class="stat-row"><span class="stat-label">Model</span><span class="stat-value">${agentRes.ok ? (agentRes.model || 'N/A') : 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">Provider</span><span class="stat-value">${agentRes.ok ? (agentRes.provider || 'N/A') : 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">Gateway</span><span class="stat-value ${agentRes.ok && agentRes.gatewayStatus?.includes('running') ? 'status-ok' : 'status-off'}">${agentRes.ok ? (agentRes.gatewayStatus || 'N/A') : 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">API Keys</span><span class="stat-value">${agentRes.ok ? `${agentRes.apiKeys?.active || 0}/${agentRes.apiKeys?.total || 0} active` : 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">Platforms</span><span class="stat-value">${agentRes.ok ? (agentRes.platforms?.filter(p => p.configured).map(p => p.name).join(', ') || 'None') : 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">Cron</span><span class="stat-value">${cronRes?.jobs?.length || 0} jobs</span></div>
+        <div class="stat-row"><span class="stat-label">Sessions</span><span class="stat-value">${agentRes.ok ? `${agentRes.activeSessions || 0} active` : 'N/A'}</span></div>
       `;
     }
 
@@ -2394,8 +2392,32 @@ async function loadHome(container) {
     // Load auth into home
     loadHomeAuth();
 
+    // Load setup health
+    try {
+      const checkRes = await fetch('/api/setup/check');
+      if (checkRes.ok) {
+        const checkData = await checkRes.json();
+        const allOk = checkData.checks.every(c => c.ok);
+        const items = checkData.checks.map(c =>
+          `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;">
+            <span style="color:${c.ok ? 'var(--green)' : 'var(--red)'};">${c.ok ? '✅' : '❌'}</span>
+            <span>${escapeHtml(c.label)}</span>
+            <span style="color:var(--fg-muted);font-size:11px;margin-left:auto;">${escapeHtml(c.detail || '')}</span>
+          </div>`
+        ).join('');
+        const setupCard = document.getElementById('home-setup');
+        if (setupCard) {
+          setupCard.innerHTML = `<div class="card-title">Setup Health</div>${items}`;
+        }
+      }
+    } catch (e) {
+      const setupCard = document.getElementById('home-setup');
+      if (setupCard) setupCard.innerHTML = `<div class="card-title">Setup Health</div><div class="error-msg">${escapeHtml(e.message)}</div>`;
+    }
+
   } catch (e) {
-    document.getElementById('home-cards').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div></div>`;
+    const agentCard = document.getElementById('home-agent');
+    if (agentCard) agentCard.innerHTML = `<div class="card-title">Error</div><div class="error-msg">${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -4184,6 +4206,11 @@ async function loadUsage(container) {
           <option value="">All agents</option>
         </select>
         <button class="btn btn-primary" id="usage-apply-btn" onclick="fetchUsageData()">Apply</button>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <label style="font-size:11px;color:var(--fg-muted);white-space:nowrap;">Budget $</label>
+          <input type="number" id="usage-budget" class="log-level-select" style="width:72px;" min="0" step="1" placeholder="0" value="${localStorage.getItem('hci_budget_limit') || ''}" />
+        </div>
+        <span id="budget-status-badge" style="display:none;font-size:11px;padding:3px 8px;border-radius:999px;font-weight:600;"></span>
       </div>
     </div>
 
@@ -4210,7 +4237,7 @@ async function loadUsage(container) {
       <div class="card">
         <div style="display:flex;flex-direction:column;gap:16px;">
           <div>
-            <div class="card-title" style="margin-bottom:8px;">Daily Cost</div>
+            <div class="card-title" style="margin-bottom:8px;display:flex;align-items:center;gap:8px;">Daily Cost <span id="monthly-pace-label" style="font-size:11px;font-weight:normal;color:var(--fg-muted);"></span></div>
             <canvas id="usage-chart-cost" height="100"></canvas>
           </div>
           <div>
@@ -4252,6 +4279,20 @@ async function loadUsage(container) {
     }
   } catch (e) {
     // ignore
+  }
+  // Budget input change handler
+  const budgetInput = document.getElementById('usage-budget');
+  if (budgetInput) {
+    budgetInput.addEventListener('change', () => {
+      const val = parseFloat(budgetInput.value);
+      if (!isNaN(val) && val > 0) {
+        localStorage.setItem('hci_budget_limit', val);
+      } else {
+        localStorage.removeItem('hci_budget_limit');
+      }
+      // Re-render cost chart with new budget
+      if (_lastUsageData) renderUsageCharts(_lastUsageData.d, _lastUsageData.daily);
+    });
   }
 }
 
@@ -4360,8 +4401,11 @@ async function fetchUsageData() {
 
 // Chart instances (destroy before re-render)
 const _charts = {};
+let _lastUsageData = null;
 
 function renderUsageCharts(d, daily) {
+  // Cache data for budget re-render
+  _lastUsageData = { d, daily };
   const theme = state.theme === 'light' ? 'light' : 'dark';
   const gridColor = theme === 'dark' ? 'rgba(220,203,181,0.08)' : 'rgba(11,32,31,0.08)';
   const textColor = theme === 'dark' ? '#dccbb5' : '#0b201f';
@@ -4414,35 +4458,145 @@ function renderUsageCharts(d, daily) {
     });
   }
 
-  // Daily Cost Trend
+  // Daily Cost Trend (with monthly projection + budget line)
   const costCanvas = document.getElementById('usage-chart-cost');
   if (costCanvas && daily?.daily && daily.daily.length > 0) {
-    const labels = daily.daily.map(r => r.date);
+    const baseLabels = daily.daily.map(r => r.date);
     const costData = daily.daily.map(r => r.cost || 0);
+
+    // Budget from localStorage
+    const budgetLimit = parseFloat(localStorage.getItem('hci_budget_limit')) || 0;
+
+    // Monthly projection: extend labels through end of current month
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const endOfMonth = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+
+    // Build extended labels (existing + remaining days of month)
+    const lastDate = baseLabels[baseLabels.length - 1];
+    const extendedLabels = [...baseLabels];
+    const projectionData = new Array(baseLabels.length).fill(null);
+    let cursor = new Date(lastDate + 'T00:00:00');
+    const endDate = new Date(endOfMonth + 'T00:00:00');
+    while (cursor < endDate) {
+      cursor.setDate(cursor.getDate() + 1);
+      const ds = cursor.toISOString().slice(0, 10);
+      extendedLabels.push(ds);
+      projectionData.push(null);
+    }
+
+    // Calculate weighted average daily cost (recent days weighted more)
+    // Exponential decay: most recent day gets weight 1.0, each older day × 0.85
+    const totalCost = costData.reduce((s, v) => s + v, 0);
+    let weightedSum = 0, weightTotal = 0;
+    for (let i = 0; i < costData.length; i++) {
+      const w = Math.pow(0.85, costData.length - 1 - i); // recent = higher weight
+      weightedSum += costData[i] * w;
+      weightTotal += w;
+    }
+    const avgDailyCost = weightTotal > 0 ? weightedSum / weightTotal : 0;
+    const monthlyPace = avgDailyCost * 30;
+    const simpleAvg = costData.length > 0 ? totalCost / costData.length : 0;
+    // Use weighted if we have 3+ days, otherwise simple average
+    const projAvg = costData.length >= 3 ? avgDailyCost : simpleAvg;
+
+    // Build cumulative cost array for projection (starts from last cumulative cost)
+    const cumulativeActual = [];
+    let cumSum = 0;
+    for (const c of costData) { cumSum += c; cumulativeActual.push(cumSum); }
+    // Fill projection from last actual cumulative
+    const lastCumCost = cumulativeActual.length > 0 ? cumulativeActual[cumulativeActual.length - 1] : 0;
+    const projStart = baseLabels.length;
+    for (let i = 0; i < projectionData.length - projStart; i++) {
+      projectionData[projStart + i] = lastCumCost + projAvg * (i + 1);
+    }
+    // Pad actual cumulative with nulls for the projection range
+    const actualPadded = [...cumulativeActual, ...new Array(extendedLabels.length - cumulativeActual.length).fill(null)];
+
+    // Budget line: constant value across all labels
+    const budgetLine = budgetLimit > 0 ? new Array(extendedLabels.length).fill(budgetLimit) : [];
+
+    // Build datasets
+    const datasets = [
+      {
+        label: 'Cumulative Cost ($)',
+        data: actualPadded,
+        borderColor: '#ffac02',
+        backgroundColor: 'rgba(255,172,2,0.1)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3,
+        spanGaps: false,
+      },
+      {
+        label: 'Monthly Projection',
+        data: projectionData,
+        borderColor: 'rgba(255,172,2,0.45)',
+        borderDash: [6, 4],
+        backgroundColor: 'transparent',
+        fill: false,
+        tension: 0.3,
+        pointRadius: 0,
+        spanGaps: false,
+      },
+    ];
+    if (budgetLimit > 0) {
+      datasets.push({
+        label: `Budget ($${budgetLimit})`,
+        data: budgetLine,
+        borderColor: '#ff6b6b',
+        borderDash: [8, 4],
+        backgroundColor: 'transparent',
+        fill: false,
+        pointRadius: 0,
+        borderWidth: 2,
+        spanGaps: true,
+      });
+    }
 
     _charts.cost = new Chart(costCanvas, {
       type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: 'Cost ($)',
-          data: costData,
-          borderColor: '#ffac02',
-          backgroundColor: 'rgba(255,172,2,0.1)',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 3,
-        }],
-      },
+      data: { labels: extendedLabels, datasets },
       options: {
         responsive: true,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: true, labels: { color: textColor, font: { size: 10 }, boxWidth: 12, padding: 8 } },
+          tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(4)}` } },
+        },
         scales: {
           x: { ticks: { color: textColor, maxRotation: 45 }, grid: { color: gridColor } },
-          y: { ticks: { color: textColor, callback: v => '$' + v.toFixed(2) }, grid: { color: gridColor } },
+          y: { ticks: { color: textColor, callback: v => '$' + v.toFixed(2) }, grid: { color: gridColor }, beginAtZero: true },
         },
       },
     });
+
+    // Update budget status badge
+    const badge = document.getElementById('budget-status-badge');
+    if (badge) {
+      if (budgetLimit > 0) {
+        badge.style.display = 'inline-block';
+        if (monthlyPace > budgetLimit) {
+          const over = ((monthlyPace / budgetLimit - 1) * 100).toFixed(0);
+          badge.textContent = `⚠ Over budget by ${over}%`;
+          badge.style.backgroundColor = 'rgba(255,107,107,0.15)';
+          badge.style.color = '#ff6b6b';
+        } else {
+          const remaining = ((1 - monthlyPace / budgetLimit) * 100).toFixed(0);
+          badge.textContent = `✓ ${remaining}% under budget`;
+          badge.style.backgroundColor = 'rgba(78,205,196,0.15)';
+          badge.style.color = '#4ecdc4';
+        }
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+    // Update monthly pace label in card title
+    const paceLabel = document.getElementById('monthly-pace-label');
+    if (paceLabel) {
+      paceLabel.textContent = `· ~$${monthlyPace.toFixed(2)}/mo pace`;
+    }
   } else if (costCanvas) {
     // Fallback: model cost distribution
     const models = (d.models || []).slice(0, 6);
@@ -4506,11 +4660,23 @@ async function loadSkills(container) {
   let currentPage = 1;
   let totalPages = 1;
   let profiles = [];
+  let installedSkills = new Set();
 
-  // Load profiles for install picker
+  // Load profiles + installed skills for button state tracking
   try {
     const profRes = await api('/api/profiles');
     if (profRes.ok) profiles = profRes.profiles || [];
+    const activeProfile = profiles.find(p => p.active) || { name: 'default' };
+    try {
+      const instRes = await api(`/api/skills/list/${activeProfile.name}`);
+      if (instRes.ok && instRes.output) {
+        const lines = instRes.output.split('\n');
+        for (const line of lines) {
+          const match = line.match(/[│┃]\s*([^\s│┃][^\s│┃]*)\s*[│┃]/);
+          if (match) installedSkills.add(match[1].trim());
+        }
+      }
+    } catch {}
   } catch {}
 
   async function loadPage(page) {
@@ -4564,7 +4730,9 @@ async function loadSkills(container) {
               </div>
               <div style="margin-top:10px;display:flex;gap:6px;">
                 <button class="btn btn-ghost btn-sm" onclick="window.inspectSkill('${escapeHtml(s.name)}')">👁️ Preview</button>
-                <button class="btn btn-primary btn-sm" onclick="window.installSkill('${escapeHtml(s.name)}')">⬇️ Install</button>
+                ${installedSkills.has(s.name)
+                  ? `<button class="btn btn-ok btn-sm" disabled style="cursor:default;">✅ Installed</button>`
+                  : `<button class="btn btn-primary btn-sm" onclick="window.installSkill('${escapeHtml(s.name)}')">⬇️ Install</button>`}
               </div>
             </div>
           `;
@@ -4615,7 +4783,9 @@ async function loadSkills(container) {
                 </div>
                 <div style="margin-top:8px;display:flex;gap:6px;">
                   <button class="btn btn-ghost btn-sm" onclick="window.inspectSkill('${escapeHtml(s.identifier || s.name)}')">🔍 Preview</button>
-                  <button class="btn btn-primary btn-sm" onclick="window.installSkill('${escapeHtml(s.identifier || s.name)}')">⬇ Install</button>
+                  ${installedSkills.has(s.identifier || s.name)
+                    ? `<button class="btn btn-ok btn-sm" disabled style="cursor:default;">✅ Installed</button>`
+                    : `<button class="btn btn-primary btn-sm" onclick="window.installSkill('${escapeHtml(s.identifier || s.name)}')">⬇ Install</button>`}
                 </div>
               </div>
             `).join('') + '</div>';
@@ -4709,7 +4879,12 @@ window.doInstallSkill = async function(skillName) {
     const res = await api('/api/skills/install', { method: 'POST', body: JSON.stringify({ skill: skillName, profile }) });
     if (res.ok) {
       if (statusEl) statusEl.innerHTML = `<div style="color:var(--ok);margin-top:8px;">✅ Installed to ${escapeHtml(profile || 'default')}!</div>`;
-      setTimeout(() => overlay?.remove(), 2000);
+      setTimeout(() => {
+        overlay?.remove();
+        // Refresh skills page to update button states
+        const skillsTab = document.querySelector('.tab[data-tab="skills"]');
+        if (skillsTab) skillsTab.click();
+      }, 1500);
     } else {
       if (statusEl) statusEl.innerHTML = `<div style="color:var(--err);margin-top:8px;">❌ ${escapeHtml(res.output || res.error || 'Install failed')}</div>`;
     }
@@ -6481,6 +6656,25 @@ const LEVEL_STYLES = {
   USR: 'color:var(--purple,#a78bfa)',
 };
 
+// Entry type definitions for structured log badges
+const TYPE_DEFS = {
+  QC:    { keywords: ['quality', 'score', 'eval'],            color: '#a78bfa', label: 'QC' },
+  ALERT: { keywords: ['alert', 'warning', 'critical', 'threshold'], color: '#ff6b6b', label: 'ALERT' },
+  TASK:  { keywords: ['task', 'job', 'running', 'completed'], color: '#4ecdc4', label: 'TASK' },
+  TOOL:  { keywords: ['tool', 'function', 'call'],            color: '#60a5fa', label: 'TOOL' },
+  MCP:   { keywords: ['mcp', 'mcp-server', 'stdio'],         color: '#fb923c', label: 'MCP' },
+};
+
+function detectLogType(message) {
+  if (!message) return null;
+  const lower = message.toLowerCase();
+  // Check MCP first (more specific) before TOOL which shares 'mcp' keyword
+  for (const [type, def] of Object.entries(TYPE_DEFS)) {
+    if (def.keywords.some(kw => lower.includes(kw))) return type;
+  }
+  return null;
+}
+
 async function loadLogs(container) {
   state._logsData = [];
   state._logsAutoRefresh = true;
@@ -6488,6 +6682,7 @@ async function loadLogs(container) {
   state._logsStickyBottom = true;
   state._logsLevel = '';
   state._logsComponent = '';
+  state._logsType = '';
 
   container.innerHTML = `
     <div id="logs-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:8px;">
@@ -6507,6 +6702,17 @@ async function loadLogs(container) {
           <button class="btn btn-ghost btn-sm logs-lvl-btn" data-level="debug" onclick="setLogsLevel('debug')">DBG</button>
           <button class="btn btn-ghost btn-sm logs-lvl-btn" data-level="warn" onclick="setLogsLevel('warn')">WRN</button>
           <button class="btn btn-ghost btn-sm logs-lvl-btn" data-level="error" onclick="setLogsLevel('error')">ERR</button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <span style="font-size:11px;color:var(--fg-muted);">Type:</span>
+        <div id="logs-type-btns" style="display:flex;gap:3px;">
+          <button class="btn btn-ghost btn-sm logs-type-btn active" data-type="" onclick="setLogsType('')">ALL</button>
+          <button class="btn btn-ghost btn-sm logs-type-btn" data-type="QC" onclick="setLogsType('QC')" style="color:#a78bfa;">QC</button>
+          <button class="btn btn-ghost btn-sm logs-type-btn" data-type="ALERT" onclick="setLogsType('ALERT')" style="color:#ff6b6b;">ALERT</button>
+          <button class="btn btn-ghost btn-sm logs-type-btn" data-type="TASK" onclick="setLogsType('TASK')" style="color:#4ecdc4;">TASK</button>
+          <button class="btn btn-ghost btn-sm logs-type-btn" data-type="TOOL" onclick="setLogsType('TOOL')" style="color:#60a5fa;">TOOL</button>
+          <button class="btn btn-ghost btn-sm logs-type-btn" data-type="MCP" onclick="setLogsType('MCP')" style="color:#fb923c;">MCP</button>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:4px;">
@@ -6585,6 +6791,10 @@ async function loadMonitoring(container) {
         <div class="mon-card-body">
           <div class="mon-big-val" id="mon-cpu-val">—</div>
           <div class="mon-sub" id="mon-cpu-sub">%</div>
+          <div class="mon-progress-track">
+            <div class="mon-progress-fill" id="mon-cpu-bar" style="width:0%"></div>
+          </div>
+          <div class="mon-progress-label" id="mon-cpu-pct">—</div>
         </div>
       </div>
       <div class="mon-card" id="mon-mem">
@@ -6592,6 +6802,10 @@ async function loadMonitoring(container) {
         <div class="mon-card-body">
           <div class="mon-big-val" id="mon-mem-val">—</div>
           <div class="mon-sub" id="mon-mem-sub">MB</div>
+          <div class="mon-progress-track">
+            <div class="mon-progress-fill" id="mon-mem-bar" style="width:0%"></div>
+          </div>
+          <div class="mon-progress-label" id="mon-mem-pct">—</div>
         </div>
       </div>
       <div class="mon-card" id="mon-disk">
@@ -6599,6 +6813,10 @@ async function loadMonitoring(container) {
         <div class="mon-card-body">
           <div class="mon-big-val" id="mon-disk-val">—</div>
           <div class="mon-sub" id="mon-disk-sub"></div>
+          <div class="mon-progress-track">
+            <div class="mon-progress-fill" id="mon-disk-bar" style="width:0%"></div>
+          </div>
+          <div class="mon-progress-label" id="mon-disk-pct">—</div>
         </div>
       </div>
       <div class="mon-card" id="mon-procs">
@@ -6692,6 +6910,27 @@ async function refreshMonitoring() {
     document.getElementById('mon-disk-sub').textContent = (r.disk || '—').split(' ').slice(1).join(' ') || '';
     document.getElementById('mon-procs-val').textContent = r.processes || 0;
 
+    // Progress bars — color-coded: green (<60%), yellow (60-80%), red (>80%)
+    const getBarColor = (pct) => pct > 80 ? 'var(--danger, #ef4444)' : pct > 60 ? 'var(--warning, #eab308)' : 'var(--success, #22c55e)';
+
+    const cpuPct = r.cpu_pct ?? (parseFloat(r.cpu) || 0);
+    const cpuBar = document.getElementById('mon-cpu-bar');
+    const cpuPctEl = document.getElementById('mon-cpu-pct');
+    if (cpuBar) { cpuBar.style.width = Math.min(cpuPct, 100) + '%'; cpuBar.style.background = getBarColor(cpuPct); }
+    if (cpuPctEl) { cpuPctEl.textContent = cpuPct.toFixed(1) + '%'; cpuPctEl.style.color = getBarColor(cpuPct); }
+
+    const memPct = r.mem_pct ?? 0;
+    const memBar = document.getElementById('mon-mem-bar');
+    const memPctEl = document.getElementById('mon-mem-pct');
+    if (memBar) { memBar.style.width = Math.min(memPct, 100) + '%'; memBar.style.background = getBarColor(memPct); }
+    if (memPctEl) { memPctEl.textContent = memPct.toFixed(1) + '% used'; memPctEl.style.color = getBarColor(memPct); }
+
+    const diskPct = r.disk_pct ?? 0;
+    const diskBar = document.getElementById('mon-disk-bar');
+    const diskPctEl = document.getElementById('mon-disk-pct');
+    if (diskBar) { diskBar.style.width = Math.min(diskPct, 100) + '%'; diskBar.style.background = getBarColor(diskPct); }
+    if (diskPctEl) { diskPctEl.textContent = diskPct.toFixed(1) + '% used'; diskPctEl.style.color = getBarColor(diskPct); }
+
     // Load averages
     document.getElementById('mon-load1').textContent = r.load?.avg1 || '—';
     document.getElementById('mon-load5').textContent = r.load?.avg5 || '—';
@@ -6737,6 +6976,12 @@ async function refreshLogs() {
       // Client-side component filter
       if (component) {
         logs = logs.filter(l => (l.component || '').toLowerCase() === component.toLowerCase());
+      }
+
+      // Client-side type filter
+      const typeFilter = state._logsType || '';
+      if (typeFilter) {
+        logs = logs.filter(l => detectLogType(l.message) === typeFilter);
       }
 
       state._logsData = logs;
@@ -6789,6 +7034,13 @@ function renderLogs() {
     lvlCounts[s] = (lvlCounts[s] || 0) + 1;
   });
 
+  // Type counts
+  const typeCounts = {};
+  logs.forEach(e => {
+    const t = detectLogType(e.message);
+    if (t) typeCounts[t] = (typeCounts[t] || 0) + 1;
+  });
+
   // Collect unique components
   const components = [...new Set(logs.map(e => e.component).filter(Boolean))];
 
@@ -6801,17 +7053,21 @@ function renderLogs() {
     const msg = escapeHtml(e.message || '');
     const countBadge = e.count > 1 ? `<span style="color:var(--coral);font-weight:700;margin-left:4px;">×${e.count}</span>` : '';
     const copyIcon = `<span class="log-copy-icon" onclick="copyLogLine(this)" title="Copy" style="cursor:pointer;opacity:0;transition:opacity 0.15s;color:var(--fg-muted);margin-left:6px;">⧉</span>`;
-
     // Make component clickable for filtering
     const compSpan = comp ? `<span class="log-comp" onclick="setLogsComponent('${escapeHtml(comp)}')" style="cursor:pointer;color:var(--teal);text-decoration:none;" title="Filter by ${escapeHtml(comp)}">${escapeHtml(comp)}</span>` : '';
-
+    // Detect entry type for badge
+    const entryType = detectLogType(e.message);
+    const typeBadge = entryType && TYPE_DEFS[entryType]
+      ? `<span style="color:${TYPE_DEFS[entryType].color};font-weight:600;font-size:10px;letter-spacing:0.3px;background:${TYPE_DEFS[entryType].color}18;padding:0 4px;border-radius:3px;margin-left:4px;cursor:pointer;" onclick="setLogsType('${entryType}')" title="Filter by ${entryType}">${entryType}</span>`
+      : '';
     return `<div class="log-line" onmouseenter="this.querySelector('.log-copy-icon').style.opacity=1" onmouseleave="this.querySelector('.log-copy-icon').style.opacity=0" style="display:flex;align-items:baseline;padding:1px 4px;border-radius:3px;${shortLvl === 'ERR' ? 'background:rgba(255,107,107,0.06);' : ''}${shortLvl === 'WRN' ? 'background:rgba(255,172,2,0.04);' : ''}">
       <span style="color:var(--fg-subtle);user-select:none;min-width:70px;">[${time}]</span>
       <span style="${style};min-width:32px;text-align:center;font-weight:600;user-select:none;">${shortLvl}</span>
-      ${compSpan ? compSpan + ' ' : '<span style="min-width:40px;"></span>'}
-      <span style="flex:1;word-break:break-all;">${msg}${countBadge}</span>${copyIcon}
-    </div>`;
-  }).join('');
+      ${typeBadge}
+     ${compSpan ? compSpan + ' ' : '<span style="min-width:40px;"></span>'}
+     <span style="flex:1;word-break:break-all;">${msg}${countBadge}</span>${copyIcon}
+   </div>`;
+ }).join('');
 
   panel.innerHTML = html;
 
@@ -6828,6 +7084,7 @@ function renderLogs() {
       <span style="color:${LEVEL_STYLES.DBG}">DBG ${lvlCounts.DBG}</span>
       <span style="color:${LEVEL_STYLES.WRN}">WRN ${lvlCounts.WRN}</span>
       <span style="color:${LEVEL_STYLES.ERR}">ERR ${lvlCounts.ERR}</span>
+      ${Object.entries(typeCounts).map(([t, c]) => `<span style="color:${TYPE_DEFS[t]?.color || 'var(--fg-muted)'};margin-left:6px;">${t} ${c}</span>`).join('')}
       ${components.length > 0 ? `<span style="margin-left:auto;color:var(--fg-subtle);">${components.length} components</span>` : ''}
     `;
   }
@@ -6851,6 +7108,14 @@ function setLogsLevel(lvl) {
   state._logsLevel = lvl;
   document.querySelectorAll('.logs-lvl-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.level === lvl);
+  });
+  refreshLogs();
+}
+
+function setLogsType(type) {
+  state._logsType = type;
+  document.querySelectorAll('.logs-type-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.type === type);
   });
   refreshLogs();
 }
@@ -6997,6 +7262,7 @@ window.hasPerm = hasPerm;
 window.refreshLogs = refreshLogs;
 window.toggleLogsAuto = toggleLogsAuto;
 window.setLogsLevel = setLogsLevel;
+window.setLogsType = setLogsType;
 window.setLogsComponent = setLogsComponent;
 window.setLogsMode = setLogsMode;
 window.debounceLogsSearch = debounceLogsSearch;

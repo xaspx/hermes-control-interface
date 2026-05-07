@@ -1944,7 +1944,7 @@
   transition: border-color 0.2s;
 }
 .chat-input-area textarea:focus { border-color: var(--accent); }
-@media (max-width: 768px) {
+@media (max-width: 640px) {
   .chat-layout { flex-direction: column; height: auto; }
   .chat-sidebar { width: 100%; min-width: 0; max-height: 200px; border-right: 0; border-bottom: 1px solid var(--border); }
   .chat-main { min-height: 400px; }
