@@ -99,9 +99,14 @@ function shell(cmd, timeout = '8s') {
 }
 
 // Safer execution — no bash interpretation, direct args
+const HERMES_CLI = process.env.HERMES_CLI
+  || path.join(os.homedir(), '.hermes', 'hermes-agent', 'venv', 'bin', 'hermes')
+  || 'hermes';
+
 function execHermes(args, timeout = 30000) {
+  const command = fs.existsSync(HERMES_CLI) ? HERMES_CLI : 'hermes';
   return new Promise((resolve) => {
-    execFile('hermes', args, {
+    execFile(command, args, {
       encoding: 'utf8',
       maxBuffer: 64 * 1024,
       timeout,
@@ -1245,7 +1250,7 @@ function parseHermesCronList(raw) {
 async function getCronJobs() {
   const now = Date.now();
   if (getCronJobs.cache && now - getCronJobs.cache.at < 10_000) return getCronJobs.cache.data;
-  const raw = await shell('hermes cron list');
+  const raw = await execHermes(['cron', 'list', '--all'], 15000);
   if (raw) {
     const data = parseHermesCronList(raw);
     getCronJobs.cache = { at: now, data };
