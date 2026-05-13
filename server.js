@@ -17,6 +17,11 @@ const {
   mergeSessionsFromSources,
   parseHermesSessionsList,
 } = require('./lib/session-list');
+const {
+  buildWorkflowIndex,
+  getWorkflowDetail,
+  resolveMiraRepoDir,
+} = require('./lib/workflows');
 
 // ── TUI Gateway Bridge ──
 const { getBridge, killAllBridges } = require('./lib/tui-gateway-bridge');
@@ -107,10 +112,15 @@ function shell(cmd, timeout = '8s') {
 }
 
 // Safer execution — no bash interpretation, direct args
-// Optional stdin: pipe data to the process (e.g. 'y' for confirmation prompts)
+// Optional stdin: pipe data to the process (e.g. 'y' for confirmation prompts).
+// Prefer the venv-installed Hermes binary so LaunchAgent environments do not depend on shell PATH.
+const HERMES_CLI = process.env.HERMES_CLI
+  || path.join(os.homedir(), '.hermes', 'hermes-agent', 'venv', 'bin', 'hermes');
+
 function execHermes(args, timeout = 30000, stdin = null) {
+  const command = fs.existsSync(HERMES_CLI) ? HERMES_CLI : 'hermes';
   return new Promise((resolve) => {
-    const proc = execFile('hermes', args, {
+    const proc = execFile(command, args, {
       encoding: 'utf8',
       maxBuffer: 64 * 1024,
       timeout,
@@ -1288,6 +1298,11 @@ function parseHermesCronList(raw) {
       continue;
     }
     if (!current) continue;
+    const deliveryFailed = trimmed.match(/Delivery failed:\s*(.*)$/i);
+    if (deliveryFailed) {
+      current.lastDeliveryError = deliveryFailed[1].trim();
+      continue;
+    }
     const kv = trimmed.match(/^([A-Za-z ]+):\s*(.*)$/);
     if (!kv) continue;
     const key = kv[1].toLowerCase();
@@ -1296,8 +1311,14 @@ function parseHermesCronList(raw) {
     else if (key === 'schedule') current.schedule = value || 'n/a';
     else if (key === 'repeat') current.repeat = value || null;
     else if (key === 'next run') current.nextRun = value || null;
-    else if (key === 'last run') current.lastRun = value || null;
+    else if (key === 'last run') {
+      current.lastRun = value || null;
+      const statusMatch = value.match(/\s+(ok|failed|failure|error|cancelled|timeout)\s*$/i);
+      if (statusMatch) current.lastStatus = statusMatch[1].toLowerCase();
+    }
     else if (key === 'deliver') current.deliver = value || 'n/a';
+    else if (key === 'last status') current.lastStatus = value || null;
+    else if (key === 'last delivery error') current.lastDeliveryError = value || null;
   }
   flush();
   return jobs;
@@ -1306,7 +1327,7 @@ function parseHermesCronList(raw) {
 async function getCronJobs() {
   const now = Date.now();
   if (getCronJobs.cache && now - getCronJobs.cache.at < 10_000) return getCronJobs.cache.data;
-  const raw = await shell('hermes cron list');
+  const raw = await execHermes(['cron', 'list', '--all'], 15000);
   if (raw) {
     const data = parseHermesCronList(raw);
     getCronJobs.cache = { at: now, data };
@@ -2393,7 +2414,7 @@ app.get('/api/gateway/:profile', requireAuth, async (req, res) => {
   try {
     // Probe API health first, systemctl as fallback
     const probe = await probeGatewayHealth(profile);
-    
+
     // If API probe succeeded, use that as primary signal
     if (probe.managedBy === 'api' && probe.ok) {
       // Still get systemctl info for display if available
@@ -2405,7 +2426,7 @@ app.get('/api/gateway/:profile', requireAuth, async (req, res) => {
         ]);
         systemdInfo = { enabled: isEnabled.trim() === 'enabled', status: status.trim() };
       } catch {}
-      
+
       return res.json({
         ok: true,
         profile,
@@ -2417,7 +2438,7 @@ app.get('/api/gateway/:profile', requireAuth, async (req, res) => {
         systemd: systemdInfo,
       });
     }
-    
+
     // Fallback to systemctl
     const svc = svcs.primary;
     const [isActive, isEnabled, status] = await Promise.all([
@@ -2944,6 +2965,29 @@ app.post('/api/cron/:action', requireAuth, requireCsrf, requirePerm('cron.manage
     return res.json(result);
   } catch (error) {
     return res.status(error.statusCode || 400).json({ error: error.message || 'cron action failed' });
+  }
+});
+
+app.get('/api/workflows', requireAuth, async (req, res) => {
+  try {
+    const repoDir = resolveMiraRepoDir(req.query.repoDir || process.env.MIRA_REPO_DIR);
+    const cronJobsData = await getCronJobs();
+    const result = buildWorkflowIndex({ repoDir, cronJobs: cronJobsData });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'failed to load workflows' });
+  }
+});
+
+app.get('/api/workflows/:id', requireAuth, async (req, res) => {
+  try {
+    const repoDir = resolveMiraRepoDir(req.query.repoDir || process.env.MIRA_REPO_DIR);
+    const cronJobsData = await getCronJobs();
+    const workflow = getWorkflowDetail({ repoDir, id: req.params.id, cronJobs: cronJobsData });
+    if (!workflow) return res.status(404).json({ ok: false, error: 'workflow not found' });
+    return res.json({ ok: true, workflow });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'failed to load workflow' });
   }
 });
 
