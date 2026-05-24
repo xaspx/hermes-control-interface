@@ -6,65 +6,61 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#1a1a2e" />
-  <title>Hermes Control Interface</title>
+  <title data-i18n="appTitle">Hermes Control Interface</title>
   <link rel="icon" type="image/svg+xml" href="/assets/favicon-Bkag5KeL.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css" crossorigin="anonymous">
-  <script type="module" crossorigin src="/assets/index-B6PrWp6i.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CkBYflNC.css">
+  <script type="module" crossorigin src="/assets/index-DXC1lv8V.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-C33hUJXJ.css">
 </head>
 <body>
-  <!-- Login Overlay (shown before auth) -->
   <div id="login-overlay" class="overlay">
     <div class="login-card">
-      <div class="login-brand">Hermes Control Interface</div>
-      <div class="login-sub" id="login-sub">Enter credentials to continue</div>
+      <div class="login-brand" data-i18n="appTitle">Hermes Control Interface</div>
+      <div class="login-sub" id="login-sub" data-i18n="login.subtitle">Enter credentials to continue</div>
       <form id="login-form" class="login-form">
-        <input id="login-username" type="text" placeholder="Username" autocomplete="username" />
-        <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" />
-        <button type="submit" class="btn btn-primary">unlock</button>
+        <input id="login-username" type="text" placeholder="Username" data-i18n-placeholder="login.username" autocomplete="username" />
+        <input id="login-password" type="password" placeholder="Password" data-i18n-placeholder="login.password" autocomplete="current-password" />
+        <button type="submit" class="btn btn-primary" data-i18n="login.unlock">unlock</button>
       </form>
-      <!-- First-run: Create Admin -->
       <form id="setup-form" class="login-form" style="display:none;">
-        <div class="login-sub">First run — create admin account</div>
-        <input id="setup-username" type="text" placeholder="Username" autocomplete="username" />
-        <input id="setup-password" type="password" placeholder="Password (min 8 chars)" autocomplete="new-password" />
-        <input id="setup-password-confirm" type="password" placeholder="Confirm password" autocomplete="new-password" />
-        <button type="submit" class="btn btn-primary">create admin</button>
+        <div class="login-sub" data-i18n="login.subtitleFirstRun">First run — create admin account</div>
+        <input id="setup-username" type="text" placeholder="Username" data-i18n-placeholder="login.username" autocomplete="username" />
+        <input id="setup-password" type="password" placeholder="Password (min 8 chars)" data-i18n-placeholder="login.passwordMin" autocomplete="new-password" />
+        <input id="setup-password-confirm" type="password" placeholder="Confirm password" data-i18n-placeholder="login.confirmPassword" autocomplete="new-password" />
+        <button type="submit" class="btn btn-primary" data-i18n="login.createAdmin">create admin</button>
       </form>
       <div id="login-error" class="login-error"></div>
     </div>
   </div>
 
-  <!-- Main App (hidden until auth) -->
   <div id="app" style="display:none;">
-    <!-- Top Nav -->
     <header id="topbar">
       <div class="topbar-left">
-        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu">☰</button>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu" data-i18n-aria="topbar.toggleMenu">☰</button>
         <img src="/assets/hermes-icon-BhPDiZ8G.svg" alt="Hermes" class="brand-logo" />
-        <div class="brand-sub">Hermes Control Interface</div>
+        <div class="brand-sub" data-i18n="appTitle">Hermes Control Interface</div>
       </div>
       <nav class="topbar-nav" id="nav">
-        <a href="#home" class="nav-link active" data-page="home">Home</a>
-        <a href="#agents" class="nav-link" data-page="agents">Agents</a>
-        <a href="#usage" class="nav-link" data-page="usage">Usage</a>
-        <a href="#skills" class="nav-link" data-page="skills">Skills</a>
-<a href="#chat" class="nav-link" data-page="chat">Chat</a>
-<a href="#logs" class="nav-link" data-page="logs">Logs</a>
-<a href="#mon" class="nav-link" data-page="mon">Monitor</a>
-<a href="#maintenance" class="nav-link" data-page="maintenance">Maintenance</a>
-<a href="#files" class="nav-link" data-page="files">Files</a>
-<a href="#office" class="nav-link" data-page="office">Office</a>
-</nav>
+        <a href="#home" class="nav-link active" data-page="home" data-i18n="topbar.home">Home</a>
+        <a href="#agents" class="nav-link" data-page="agents" data-i18n="topbar.agents">Agents</a>
+        <a href="#usage" class="nav-link" data-page="usage" data-i18n="topbar.usage">Usage</a>
+        <a href="#skills" class="nav-link" data-page="skills" data-i18n="topbar.skills">Skills</a>
+        <a href="#chat" class="nav-link" data-page="chat" data-i18n="topbar.chat">Chat</a>
+        <a href="#logs" class="nav-link" data-page="logs" data-i18n="topbar.logs">Logs</a>
+        <a href="#mon" class="nav-link" data-page="mon" data-i18n="topbar.monitor">Monitor</a>
+        <a href="#maintenance" class="nav-link" data-page="maintenance" data-i18n="topbar.maintenance">Maintenance</a>
+        <a href="#files" class="nav-link" data-page="files" data-i18n="topbar.files">Files</a>
+        <a href="#office" class="nav-link" data-page="office" data-i18n="topbar.office">Office</a>
+      </nav>
       <div class="topbar-right">
-        <button class="icon-btn" id="notif-btn" title="Notifications">
+        <button class="icon-btn" id="notif-btn" title="Notifications" data-i18n-title="topbar.notifications">
           <span class="notif-icon">🔔</span>
           <span class="notif-badge" id="notif-badge" style="display:none;">0</span>
         </button>
-        <button class="icon-btn" id="theme-toggle" title="Toggle theme">
+        <button class="icon-btn" id="theme-toggle" title="Toggle theme" data-i18n-title="topbar.toggleTheme">
           <span id="theme-icon">🌙</span>
         </button>
         <div class="user-menu" id="user-menu">
@@ -73,28 +69,25 @@
             <span class="user-role" id="user-role">admin</span>
           </button>
           <div class="user-dropdown" id="user-dropdown" style="display:none;">
-            <button class="dropdown-item" id="users-mgmt-btn" style="display:none;">👥 User Management</button>
-            <button class="dropdown-item" id="change-password-btn">Change Password</button>
-            <button class="dropdown-item" id="logout-btn">Logout</button>
+            <button class="dropdown-item" id="users-mgmt-btn" style="display:none;"><span>👥 </span><span data-i18n="topbar.userManagement">User Management</span></button>
+            <button class="dropdown-item" id="change-password-btn" data-i18n="topbar.changePassword">Change Password</button>
+            <button class="dropdown-item" id="logout-btn" data-i18n="topbar.logout">Logout</button>
           </div>
         </div>
       </div>
     </header>
 
-    <!-- Notification Dropdown -->
     <div id="notif-dropdown" class="notif-dropdown" style="display:none;">
       <div class="notif-header">
-        <span>Notifications</span>
-        <button class="btn-link" id="notif-clear">Clear all</button>
+        <span data-i18n="notif.title">Notifications</span>
+        <button class="btn-link" id="notif-clear" data-i18n="notif.clearAll">Clear all</button>
       </div>
       <div id="notif-list" class="notif-list">
-        <div class="notif-empty">No notifications</div>
+        <div class="notif-empty" data-i18n="notif.empty">No notifications</div>
       </div>
     </div>
 
-    <!-- Main Content -->
     <main id="main">
-      <!-- Pages (shown/hidden based on nav) -->
       <div id="page-home" class="page active"></div>
       <div id="page-mon" class="page"></div>
       <div id="page-agents" class="page"></div>
@@ -110,17 +103,16 @@
     </main>
   </div>
 
-  <!-- Change Password Modal -->
   <div id="password-modal" class="modal-overlay" style="display:none;">
     <div class="modal-card">
-      <div class="modal-title">Change Password</div>
+      <div class="modal-title" data-i18n="passwordModal.title">Change Password</div>
       <form id="password-form">
-        <input id="current-password" type="password" placeholder="Current password" autocomplete="current-password" />
-        <input id="new-password" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password" />
-        <input id="confirm-new-password" type="password" placeholder="Confirm new password" autocomplete="new-password" />
+        <input id="current-password" type="password" placeholder="Current password" data-i18n-placeholder="passwordModal.current" autocomplete="current-password" />
+        <input id="new-password" type="password" placeholder="New password (min 8 chars)" data-i18n-placeholder="passwordModal.new" autocomplete="new-password" />
+        <input id="confirm-new-password" type="password" placeholder="Confirm new password" data-i18n-placeholder="passwordModal.confirm" autocomplete="new-password" />
         <div class="modal-actions">
-          <button type="button" class="btn btn-ghost" id="password-cancel">Cancel</button>
-          <button type="submit" class="btn btn-primary">Update</button>
+          <button type="button" class="btn btn-ghost" id="password-cancel" data-i18n="passwordModal.cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" data-i18n="passwordModal.update">Update</button>
         </div>
       </form>
       <div id="password-error" class="login-error"></div>

@@ -1,0 +1,14 @@
+[Unit]
+Description=Hermes Control Interface - %i
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+User=root
+Group=root
+
+# Instance config — set PORT + WorkingDirectory via drop-in:
+# /etc/systemd/system/hci@%i.d/override.conf

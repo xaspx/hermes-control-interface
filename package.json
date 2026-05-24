@@ -14,7 +14,9 @@
     "serve": "node server.js",
     "setup": "bash install.sh",
     "test": "node --test",
-    "reset-password": "node scripts/reset-password.js"
+    "reset-password": "node scripts/reset-password.js",
+    "postinstall": "npm rebuild better-sqlite3",
+    "changelog": "bash scripts/generate-changelog.sh"
   },
   "dependencies": {
     "@pydantic/genai-prices": "^0.0.56",
