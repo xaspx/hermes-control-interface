@@ -15,7 +15,8 @@
     "setup": "bash install.sh",
     "test": "node --test",
     "worker-status": "node scripts/workflow-worker-status.js",
-    "reset-password": "node scripts/reset-password.js"
+    "reset-password": "node scripts/reset-password.js",
+    "worker-run": "node scripts/workflow-worker-run.js"
   },
   "dependencies": {
     "@pydantic/genai-prices": "^0.0.56",
