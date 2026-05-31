@@ -5988,8 +5988,30 @@ function workflowStatusClass(status) {
   return 'status-off';
 }
 
+function workerStatusClass(status) {
+  if (status === 'idle') return 'status-ok';
+  if (status === 'starting' || status === 'generating') return 'status-warn';
+  if (status === 'waiting_approval') return 'status-err';
+  if (status === 'error') return 'status-err';
+  if (status === 'stopped') return 'status-off';
+  return 'status-off';
+}
+
 function formatWorkflowStatus(status) {
   return String(status || 'unknown').replace(/_/g, ' ');
+}
+
+function renderWorkerSummary(summary = {}) {
+  const workers = summary.workers || {};
+  const active = (workers.starting || 0) + (workers.generating || 0);
+  const attention = (workers.waiting_approval || 0) + (workers.error || 0);
+  return `
+    <div class="card workflow-summary-card">
+      <div class="card-title">Workers</div>
+      <div class="workflow-summary-value status-off">${escapeHtml(workers.total || 0)}</div>
+      <div class="workflow-muted">active: ${escapeHtml(active)} · attention: ${escapeHtml(attention)}</div>
+    </div>
+  `;
 }
 
 function renderWorkflowSummary(summary = {}) {
@@ -6004,7 +6026,18 @@ function renderWorkflowSummary(summary = {}) {
       <div class="card-title">${escapeHtml(label)}</div>
       <div class="workflow-summary-value ${cls}">${escapeHtml(value)}</div>
     </div>
-  `).join('');
+  `).join('') + renderWorkerSummary(summary);
+}
+
+function renderWorkflowWorkers(workers = []) {
+  if (!workers.length) return '<span class="workflow-muted">No workers</span>';
+  return workers.slice(0, 3).map((worker) => `
+    <div class="workflow-worker-row">
+      <span class="badge ${workerStatusClass(worker.status)}">${escapeHtml(formatWorkflowStatus(worker.status))}</span>
+      <span>${escapeHtml(worker.label || worker.id)}</span>
+      <div class="workflow-muted">${escapeHtml(worker.provider || 'unknown')}${worker.sessionId ? ` · ${escapeHtml(worker.sessionId)}` : ''}</div>
+    </div>
+  `).join('') + (workers.length > 3 ? `<div class="workflow-muted">+${escapeHtml(workers.length - 3)} more</div>` : '');
 }
 
 function renderWorkflowRows(workflows = []) {
@@ -6019,6 +6052,7 @@ function renderWorkflowRows(workflows = []) {
             <th>Workflow</th>
             <th>Status</th>
             <th>Schedule</th>
+            <th>Workers</th>
             <th>Cron</th>
             <th>Artifacts</th>
             <th></th>
@@ -6037,6 +6071,7 @@ function renderWorkflowRows(workflows = []) {
                 ${(workflow.warnings || []).slice(0, 2).map((warning) => `<div class="workflow-warning">${escapeHtml(warning)}</div>`).join('')}
               </td>
               <td>${escapeHtml(workflow.schedule || 'n/a')}</td>
+              <td>${renderWorkflowWorkers(workflow.workers || [])}</td>
               <td>
                 ${workflow.cron ? `
                   <div>${escapeHtml(workflow.cron.name || workflow.cron.id)}</div>
@@ -6097,6 +6132,7 @@ window.showWorkflowDetail = async function(id) {
         <div><strong>Status</strong><br><span class="badge ${workflowStatusClass(workflow.status)}">${escapeHtml(formatWorkflowStatus(workflow.status))}</span></div>
         <div><strong>Schedule</strong><br>${escapeHtml(workflow.schedule || 'n/a')}</div>
         <div><strong>Risk</strong><br>${escapeHtml(workflow.riskLevel || 'unknown')}</div>
+        <div><strong>Workers</strong><br>${renderWorkflowWorkers(workflow.workers || [])}</div>
         <div><strong>Cron</strong><br>${workflow.cron ? `${escapeHtml(workflow.cron.name || workflow.cron.id)}<br><span class="workflow-muted">${escapeHtml(workflow.cron.id || '')}</span>` : 'Not linked'}</div>
       </div>
       ${(workflow.warnings || []).length ? `<div class="workflow-warning-block">${(workflow.warnings || []).map((w) => `<div>⚠ ${escapeHtml(w)}</div>`).join('')}</div>` : ''}

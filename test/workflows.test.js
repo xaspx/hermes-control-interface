@@ -7,6 +7,7 @@ const test = require('node:test');
 const {
   buildWorkflowIndex,
   getWorkflowDetail,
+  normalizeWorkerStatus,
 } = require('../lib/workflows');
 
 function makeRepo() {
@@ -83,4 +84,52 @@ test('local delivery with an origin delivery error is classified as stale warnin
   });
 
   assert.equal(index.workflows[0].status, 'stale_warning');
+});
+
+test('normalizeWorkerStatus maps ADHDev-style worker states to the HCI status vocabulary', () => {
+  assert.equal(normalizeWorkerStatus('waiting_approval'), 'waiting_approval');
+  assert.equal(normalizeWorkerStatus('generating'), 'generating');
+  assert.equal(normalizeWorkerStatus('running'), 'generating');
+  assert.equal(normalizeWorkerStatus('complete'), 'idle');
+  assert.equal(normalizeWorkerStatus('blocked'), 'waiting_approval');
+  assert.equal(normalizeWorkerStatus('crashed'), 'error');
+  assert.equal(normalizeWorkerStatus(''), 'unknown');
+});
+
+test('buildWorkflowIndex exposes normalized worker session status and summary counts', () => {
+  const repoDir = makeRepo();
+  fs.writeFileSync(path.join(repoDir, 'docs', 'workflows', 'definitions', 'workers.yaml'), `id: workers
+name: Worker Status
+execution:
+  workers:
+    - id: codex-lane
+      label: Codex Lane
+      provider: codex
+      status: running
+      session_id: codex-session-1
+      updated_at: 2026-05-31T13:20:00+09:00
+    - id: claude-review
+      provider: claude
+      status: waiting_approval
+`);
+  fs.writeFileSync(path.join(repoDir, 'docs', 'workflows', 'runbooks', 'workers.md'), '# Workers\n');
+
+  const index = buildWorkflowIndex({ repoDir, cronJobs: [{ id: 'workers', name: 'workers', status: 'active' }] });
+
+  assert.deepEqual(index.summary.workers, {
+    total: 2,
+    starting: 0,
+    generating: 1,
+    waiting_approval: 1,
+    idle: 0,
+    error: 0,
+    stopped: 0,
+    unknown: 0,
+  });
+  assert.equal(index.workflows[0].workers[0].id, 'codex-lane');
+  assert.equal(index.workflows[0].workers[0].label, 'Codex Lane');
+  assert.equal(index.workflows[0].workers[0].provider, 'codex');
+  assert.equal(index.workflows[0].workers[0].status, 'generating');
+  assert.equal(index.workflows[0].workers[0].sessionId, 'codex-session-1');
+  assert.equal(index.workflows[0].workers[1].status, 'waiting_approval');
 });

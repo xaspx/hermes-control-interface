@@ -170,7 +170,7 @@
   font-size: 12px;
 }
 .workflow-summary-grid {
-  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
   margin-bottom: 18px;
 }
 .workflow-summary-card {
@@ -197,6 +197,15 @@
 }
 .workflow-goal {
   max-width: 360px;
+}
+.workflow-worker-row {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 8px;
+  min-width: 150px;
+}
+.workflow-worker-row .badge {
+  width: fit-content;
 }
 .workflow-warning {
   margin-top: 6px;
