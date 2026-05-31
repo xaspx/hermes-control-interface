@@ -133,3 +133,50 @@ execution:
   assert.equal(index.workflows[0].workers[0].sessionId, 'codex-session-1');
   assert.equal(index.workflows[0].workers[1].status, 'waiting_approval');
 });
+
+test('buildWorkflowIndex overlays runtime worker status snapshots from repo-local files', () => {
+  const repoDir = makeRepo();
+  fs.mkdirSync(path.join(repoDir, 'reports', 'workflows', 'runtime'), { recursive: true });
+  fs.writeFileSync(path.join(repoDir, 'docs', 'workflows', 'definitions', 'runtime-workers.yaml'), `id: runtime-workers
+name: Runtime Workers
+execution:
+  worker_status_file: reports/workflows/runtime/runtime-workers.json
+  workers:
+    - id: codex-lane
+      label: Codex Lane
+      provider: codex
+      status: idle
+      session_id: old-session
+`);
+  fs.writeFileSync(path.join(repoDir, 'docs', 'workflows', 'runbooks', 'runtime-workers.md'), '# Runtime Workers\n');
+  fs.writeFileSync(path.join(repoDir, 'reports', 'workflows', 'runtime', 'runtime-workers.json'), JSON.stringify({
+    workers: [{
+      id: 'codex-lane',
+      status: 'blocked',
+      session_id: 'live-session-42',
+      updated_at: '2026-05-31T13:45:00+09:00',
+      note: 'approval required',
+    }, {
+      id: 'claude-review',
+      label: 'Claude Review',
+      provider: 'claude',
+      status: 'running',
+    }],
+  }));
+
+  const index = buildWorkflowIndex({ repoDir, cronJobs: [{ id: 'runtime-workers', name: 'runtime-workers', status: 'active' }] });
+  const workflow = index.workflows[0];
+
+  assert.equal(workflow.workers.length, 2);
+  assert.equal(workflow.workers[0].id, 'codex-lane');
+  assert.equal(workflow.workers[0].label, 'Codex Lane');
+  assert.equal(workflow.workers[0].provider, 'codex');
+  assert.equal(workflow.workers[0].status, 'waiting_approval');
+  assert.equal(workflow.workers[0].sessionId, 'live-session-42');
+  assert.equal(workflow.workers[0].note, 'approval required');
+  assert.equal(workflow.workers[1].id, 'claude-review');
+  assert.equal(workflow.workers[1].status, 'generating');
+  assert.equal(index.summary.workers.total, 2);
+  assert.equal(index.summary.workers.waiting_approval, 1);
+  assert.equal(index.summary.workers.generating, 1);
+});
