@@ -14,6 +14,7 @@
     "serve": "node server.js",
     "setup": "bash install.sh",
     "test": "node --test",
+    "worker-status": "node scripts/workflow-worker-status.js",
     "reset-password": "node scripts/reset-password.js"
   },
   "dependencies": {
