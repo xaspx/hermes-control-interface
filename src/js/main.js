@@ -7,6 +7,7 @@ import { toDisplayText } from './chat-render-utils.mjs';
 import { resolveSessionDisplayTitle } from './session-title-utils.mjs';
 import { SSE_EVENT_TYPES, mapWsType } from '../../lib/sse-events.js';
 import { wsClient } from './ws-client.js';
+import { initKanbanBoard, destroyKanbanBoard, startKanbanPoll, stopKanbanPoll } from './office-kanban.js';
 Chart.register(...registerables);
 
 // State
@@ -72,6 +73,7 @@ async function checkAuth() {
       const data = await res.json();
       state.user = data.user;
       state.csrfToken = data.csrfToken;
+      window.__csrfToken = data.csrfToken;
       showApp();
       return true;
     }
@@ -186,6 +188,7 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
     if (data.ok) {
       state.user = data.user;
       state.csrfToken = data.csrfToken || '';
+      window.__csrfToken = data.csrfToken || '';
       errorEl.textContent = '';
       showApp();
     } else if (data.error === 'first_run') {
@@ -227,6 +230,7 @@ document.getElementById('setup-form')?.addEventListener('submit', async (e) => {
     if (data.ok) {
       state.user = data.user;
       state.csrfToken = data.csrfToken || '';
+      window.__csrfToken = data.csrfToken || '';
       errorEl.textContent = '';
       showApp();
     } else {
@@ -7841,359 +7845,37 @@ async function forkFromMessageIdx(el) {
 }
 
 // ============================================
-// Office — 2D Pixel Art Agent Visualization
+// Office — PixiJS Kanban Board (single renderer)
 // ============================================
 
 function stopOfficeAutoRefresh() {
-  if (state._officeInterval) {
-    clearInterval(state._officeInterval);
-    state._officeInterval = null;
-  }
+  stopKanbanPoll();
+  destroyKanbanBoard();
 }
 
 async function loadOffice(container) {
   container.innerHTML = `
-    <div class="page-header">
-      <div>
-        <div class="page-title" data-i18n="auto.office">Office</div>
-        <div class="page-subtitle" data-i18n="auto.agentWorkspaceVisualization">Agent workspace visualization</div>
-      </div>
-      <div style="display:flex;gap:8px;" id="office-controls">
-        <button class="btn btn-ghost btn-sm" onclick="window.openOfficeAssignPanel()" data-i18n="auto.departments">Departments</button>
-        <button class="btn btn-ghost btn-sm" onclick="window.refreshOffice()" data-i18n="home.refresh">↻ Refresh</button>
-      </div>
-    </div>
-    <div class="office-viewport" id="office-viewport">
-      <div class="office-floor" id="office-floor">
-        <div class="loading" data-i18n="auto.loadingOffice">Loading office</div>
-      </div>
-    </div>
-    <div class="office-assign-panel" id="office-assign-panel"></div>
-  `;
-
-  await refreshOffice();
-
-  stopOfficeAutoRefresh();
-  state._officeInterval = setInterval(refreshOffice, 10000);
-}
-
-async function refreshOffice() {
-  const floor = document.getElementById('office-floor');
-  if (!floor) return;
-
-  try {
-    const [profilesRes, deptsRes] = await Promise.all([
-      api('/api/profiles'),
-      api('/api/office/departments'),
-    ]);
-    const profiles = profilesRes.ok ? (profilesRes.profiles || []) : [];
-    const departments = deptsRes.ok ? (deptsRes.departments || []) : [];
-    renderOfficeFloor(profiles, departments, floor);
-  } catch (e) {
-    if (floor) floor.innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-function renderOfficeFloor(profiles, departments, floorEl) {
-  if (!profiles.length) {
-    floorEl.innerHTML = '<div class="empty" style="padding:40px;" data-i18n="auto.noAgentsFoundCreateAgentsFirst">No agents found. Create agents first.</div>';
-    return;
-  }
-
-  const profileMap = Object.fromEntries(profiles.map(p => [p.name, p]));
-
-  const assignmentMap = {};
-  departments.forEach(dept => {
-    dept.members.forEach(m => { assignmentMap[m] = dept; });
-  });
-
-  const unassigned = profiles.filter(p => !assignmentMap[p.name]);
-
-  const DESKS_PER_ROW = 3;
-  const DESK_SLOT_W = 88;
-  const DESK_SLOT_H = 88;
-  const ZONE_PADDING = 20;
-  const ZONE_LABEL_H = 20;
-  const ZONE_GAP = 20;
-  const FLOOR_PADDING = 24;
-
-  function zoneWidth(count) {
-    return Math.min(count, DESKS_PER_ROW) * DESK_SLOT_W + ZONE_PADDING * 2;
-  }
-  function zoneHeight(count) {
-    return Math.ceil(count / DESKS_PER_ROW) * DESK_SLOT_H + ZONE_PADDING * 2 + ZONE_LABEL_H;
-  }
-
-  const zones = [
-    ...departments
-      .map(d => ({
-        id: d.id,
-        name: d.name,
-        color: d.color,
-        agents: d.members.map(m => profileMap[m]).filter(Boolean),
-      }))
-      .filter(z => z.agents.length > 0),
-    ...(unassigned.length > 0 ? [{
-      id: '__unassigned__',
-      name: 'Unassigned',
-      color: '#6f9ac3',
-      agents: unassigned,
-    }] : []),
-  ];
-
-  if (!zones.length) {
-    floorEl.innerHTML = '<div class="empty" style="padding:40px;" data-i18n="auto.noAgentsToDisplay">No agents to display.</div>';
-    return;
-  }
-
-  let zonesHtml = '';
-  let currentY = FLOOR_PADDING;
-  let maxWidth = 0;
-
-  zones.forEach(zone => {
-    const count = zone.agents.length;
-    const w = zoneWidth(count);
-    const h = zoneHeight(count);
-    if (w + FLOOR_PADDING * 2 > maxWidth) maxWidth = w + FLOOR_PADDING * 2;
-
-    let agentsHtml = '';
-    zone.agents.forEach(profile => {
-      if (!profile) return;
-      const running = profile.gateway === 'running';
-      const stateClass = running ? 'office-agent--running' : 'office-agent--idle';
-      const deskClass  = running ? 'office-desk--running'  : 'office-desk--idle';
-      agentsHtml += `
-        <div class="office-desk-slot">
-          <div class="office-desk ${deskClass}">
-            <div class="office-agent ${stateClass}"
-                 data-profile="${escapeHtml(profile.name)}"
-                 data-running="${running}"
-                 onclick="window.showOfficeAgentPopup(this, event)">
-              <div class="agent-head">
-                <div class="agent-status-dot"></div>
-              </div>
-              <div class="agent-torso"></div>
-              <div class="agent-legs">
-                <div class="agent-leg"></div>
-                <div class="agent-leg"></div>
-              </div>
-              <div class="agent-name">${escapeHtml(profile.name)}</div>
-            </div>
-          </div>
+    <div id="office-page">
+      <div class="office--page-header">
+        <div>
+          <div class="page-title" data-i18n="auto.office">Office</div>
+          <div class="page-subtitle" data-i18n="auto.agentWorkspaceVisualization">Kanban board — live task visualization</div>
         </div>
-      `;
-    });
-
-    const borderColor = zone.color;
-    zonesHtml += `
-      <div class="office-dept-zone" style="
-        position: absolute;
-        left: ${FLOOR_PADDING}px;
-        top: ${currentY}px;
-        width: ${w}px;
-        height: ${h}px;
-        border-color: ${escapeHtml(borderColor)};
-      ">
-        <div class="office-dept-label" style="color:${escapeHtml(borderColor)};border-color:${escapeHtml(borderColor)};">
-          ${escapeHtml(zone.name)}
-        </div>
-        <div class="office-agents-grid">
-          ${agentsHtml}
+        <div style="display:flex;gap:8px;" id="office-controls">
+          <button class="btn btn-ghost btn-sm" onclick="if(window.switchKanbanBoard)switchKanbanBoard('main')">📋 main</button>
+          <button class="btn btn-ghost btn-sm" onclick="if(window.switchKanbanBoard)switchKanbanBoard('dev')">🛠 dev</button>
+          <button class="btn btn-ghost btn-sm" onclick="if(window.switchKanbanBoard)switchKanbanBoard('content')">📝 content</button>
+          <button class="btn btn-ghost btn-sm" onclick="if(window.switchKanbanBoard)switchKanbanBoard('trading')">💹 trading</button>
         </div>
       </div>
-    `;
-    currentY += h + ZONE_GAP;
-  });
-
-  const totalHeight = Math.max(400, currentY + FLOOR_PADDING);
-  floorEl.style.minHeight = totalHeight + 'px';
-  floorEl.style.minWidth  = Math.max(480, maxWidth + FLOOR_PADDING) + 'px';
-  floorEl.innerHTML = zonesHtml;
-}
-
-function showOfficeAgentPopup(agentEl, event) {
-  event.stopPropagation();
-
-  const existing = document.getElementById('office-agent-popup');
-  if (existing) {
-    const isSame = existing.dataset.profile === agentEl.dataset.profile;
-    existing.remove();
-    if (isSame) return;
-  }
-
-  const profileName = agentEl.dataset.profile;
-  const running = agentEl.dataset.running === 'true';
-
-  const popup = document.createElement('div');
-  popup.className = 'office-agent-popup';
-  popup.id = 'office-agent-popup';
-  popup.dataset.profile = profileName;
-  popup.innerHTML = `
-    <div class="popup-name">${escapeHtml(profileName)}</div>
-    <div class="popup-row">
-      <span data-i18n="auto.status">Status</span>
-      <span class="popup-val ${running ? 'status-ok' : 'status-off'}">${running ? '● Running' : '○ Stopped'}</span>
-    </div>
-    <div class="popup-actions">
-      <button class="btn btn-primary btn-sm"
-              onclick="navigate('agent-detail',{name:'${escapeHtml(profileName)}'});document.getElementById('office-agent-popup')?.remove();">
-        Open
-      </button>
-      <button class="btn btn-ghost btn-sm"
-              onclick="document.getElementById('office-agent-popup')?.remove();">
-        Close
-      </button>
+      <div id="office-kanban-root"></div>
     </div>
   `;
 
-  const rect = agentEl.getBoundingClientRect();
-  const left = Math.min(rect.left, window.innerWidth - 260);
-  const top  = Math.min(rect.bottom + 6, window.innerHeight - 160);
-  popup.style.left = left + 'px';
-  popup.style.top  = top + 'px';
-
-  document.body.appendChild(popup);
-
-  setTimeout(() => {
-    document.addEventListener('click', () => {
-      document.getElementById('office-agent-popup')?.remove();
-    }, { once: true });
-  }, 0);
+  // Init PixiJS Kanban in the root div
+  await initKanbanBoard('office-kanban-root', 'main');
+  startKanbanPoll(2000);
 }
-
-async function openOfficeAssignPanel() {
-  const panel = document.getElementById('office-assign-panel');
-  if (!panel) return;
-
-  if (panel.classList.contains('open')) {
-    panel.classList.remove('open');
-    return;
-  }
-
-  panel.innerHTML = '<div class="loading" data-i18n="common.loading">Loading</div>';
-  panel.classList.add('open');
-
-  try {
-    const [profilesRes, deptsRes] = await Promise.all([
-      api('/api/profiles'),
-      api('/api/office/departments'),
-    ]);
-    const profiles    = profilesRes.ok ? (profilesRes.profiles    || []) : [];
-    const departments = deptsRes.ok   ? (deptsRes.departments || []) : [];
-
-    panel.innerHTML = `
-      <div class="office-panel-header">
-        <div class="section-title" style="margin:0;" data-i18n="auto.departments">Departments</div>
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('office-assign-panel').classList.remove('open')">✕</button>
-      </div>
-      <button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:10px;"
-              onclick="window.showCreateDeptForm()" data-i18n="auto.newDepartment">+ New Department</button>
-      <div id="dept-create-form" style="display:none;margin-bottom:12px;padding:10px;border:1px solid var(--border);border-radius:var(--radius);">
-        <input id="dept-name-input" class="input" placeholder="Department name" style="width:100%;margin-bottom:8px;box-sizing:border-box;" maxlength="40" />
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-          <label style="font-size:11px;color:var(--fg-muted);flex-shrink:0;" data-i18n="auto.color">Color</label>
-          <input id="dept-color-input" type="color" value="#7c945c" style="cursor:pointer;" />
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="window.submitCreateDept()" style="width:100%;" data-i18n="auto.create">Create</button>
-      </div>
-      <div id="dept-list">
-        ${departments.length === 0
-          ? '<div class="empty" style="padding:16px;" data-i18n="auto.noDepartmentsYet">No departments yet</div>'
-          : departments.map(d => renderDeptPanel(d, profiles)).join('')}
-      </div>
-    `;
-  } catch (e) {
-    panel.innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-function renderDeptPanel(dept, profiles) {
-  const memberSet = new Set(dept.members);
-  const memberRows = profiles.map(p => `
-    <label class="office-member-row">
-      <input type="checkbox" ${memberSet.has(p.name) ? 'checked' : ''}
-             onchange="window.toggleDeptMember('${escapeHtml(dept.id)}','${escapeHtml(p.name)}',this.checked)"
-             style="accent-color:${escapeHtml(dept.color)};" />
-      <span>${escapeHtml(p.name)}</span>
-      <span class="${p.gateway === 'running' ? 'status-ok' : 'status-off'}" style="font-size:10px;margin-left:auto;">
-        ${p.gateway === 'running' ? '●' : '○'}
-      </span>
-    </label>
-  `).join('');
-
-  return `
-    <div class="card" style="margin-bottom:8px;padding:10px 12px;border-left:3px solid ${escapeHtml(dept.color)};">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="font-size:12px;font-weight:700;color:${escapeHtml(dept.color)};">${escapeHtml(dept.name)}</span>
-        <button class="btn btn-ghost btn-sm" style="color:var(--red);padding:2px 6px;"
-                onclick="window.deleteDept('${escapeHtml(dept.id)}')">×</button>
-      </div>
-      <div>${memberRows || '<div style="font-size:11px;color:var(--fg-muted);" data-i18n="auto.noAgentsAvailable">No agents available</div>'}</div>
-    </div>
-  `;
-}
-
-function showCreateDeptForm() {
-  const form = document.getElementById('dept-create-form');
-  if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
-}
-
-async function submitCreateDept() {
-  const name  = document.getElementById('dept-name-input')?.value?.trim();
-  const color = document.getElementById('dept-color-input')?.value || '#7c945c';
-  if (!name) { showToast(t('toast.deptNameRequired'), 'error'); return; }
-  try {
-    const res = await api('/api/office/departments', {
-      method: 'POST',
-      body: JSON.stringify({ name, color }),
-    });
-    if (res.ok) {
-      showToast(t('toast.deptCreated'), 'success');
-      openOfficeAssignPanel();
-      refreshOffice();
-    } else {
-      showToast(res.error || 'Failed to create department', 'error');
-    }
-  } catch (e) { showToast(e.message, 'error'); }
-}
-
-async function deleteDept(id) {
-  if (!await customConfirm(t('dialog.confirmDeleteDept'), 'Delete')) return;
-  try {
-    const res = await api(`/api/office/departments/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    if (res.ok) {
-      showToast(t('toast.deptDeleted'), 'success');
-      openOfficeAssignPanel();
-      refreshOffice();
-    } else { showToast(res.error || 'Failed', 'error'); }
-  } catch (e) { showToast(e.message, 'error'); }
-}
-
-async function toggleDeptMember(deptId, profileName, add) {
-  try {
-    const res = await api('/api/office/departments');
-    if (!res.ok) return;
-    const dept = res.departments.find(d => d.id === deptId);
-    if (!dept) return;
-    let members = [...(dept.members || [])];
-    if (add) members = [...new Set([...members, profileName])];
-    else     members = members.filter(m => m !== profileName);
-    await api(`/api/office/departments/${encodeURIComponent(deptId)}/members`, {
-      method: 'PUT',
-      body: JSON.stringify({ members }),
-    });
-    refreshOffice();
-  } catch (e) { showToast(e.message, 'error'); }
-}
-
-// Expose office functions for inline onclick handlers
-window.openOfficeAssignPanel = openOfficeAssignPanel;
-window.showOfficeAgentPopup  = showOfficeAgentPopup;
-window.refreshOffice         = refreshOffice;
-window.showCreateDeptForm    = showCreateDeptForm;
-window.submitCreateDept      = submitCreateDept;
-window.deleteDept            = deleteDept;
-window.toggleDeptMember      = toggleDeptMember;
 
 
 // === Auto-translate on DOM changes (i18n applyTranslations debounced) ===

@@ -186,7 +186,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net"],
       scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
@@ -3044,6 +3044,462 @@ app.put('/api/office/departments/:id/members', requireRole('admin'), requireCsrf
   writeOfficeDepartments(data);
   log('office.dept.members', `${id}: ${members.join(', ')}`);
   res.json({ ok: true });
+});
+
+// ── Office v2: Agent States + Event Timeline ───────────────────────────────
+
+// Fast agent alive check — uses pre-discovered gatewayPorts from server memory
+function checkAgentAlive(name) {
+  // gatewayPorts is set at server startup by discoverGatewayPorts()
+  // e.g. { default: 8642, david: 8645, cuan: 8650, soci: 8650 }
+  return typeof gatewayPorts === 'object' && gatewayPorts !== null && name in gatewayPorts;
+}
+// Parse agent state from `hermes -p <name> status` output (legacy — kept for reference)
+function parseOfficeAgentState(stdout, profileName) {
+  const result = {
+    name: profileName,
+    state: 'stopped',
+    model: null,
+    provider: null,
+    lastAction: null,
+  };
+
+  try {
+    const grab = (key) => {
+      const re = new RegExp(key + ':\\s*(.+)', 'm');
+      const m = stdout.match(re);
+      return m ? m[1].trim() : null;
+    };
+
+    result.model = grab('Model') || 'unknown';
+    result.provider = grab('Provider') || 'unknown';
+
+    // Detect granular state from status text
+    const lower = stdout.toLowerCase();
+
+    // Check for blocked/waiting first (highest priority)
+    if (lower.includes('waiting for user') || lower.includes('clarify') || lower.includes('blocked')) {
+      result.state = 'blocked';
+    // Check for thinking state
+    } else if (lower.includes('thinking') || lower.includes('reasoning')) {
+      result.state = 'thinking';
+    // Check for active tool execution (NOT "Terminal Backend" status line)
+    } else if (/executing|tool_call/.test(lower)) {
+      result.state = 'coding';
+    // Check for idle
+    } else if (lower.includes('idle')) {
+      result.state = 'idle';
+    // Default: running (present in status output "✓ running")
+    } else {
+      result.state = 'running';
+    }
+
+    const lastMatch = stdout.match(/Last (?:action|activity):\s*(.+)$/m);
+    if (lastMatch) result.lastAction = lastMatch[1].trim();
+
+  } catch (e) {
+    // graceful fallback — return 'unknown' state
+  }
+
+  return result;
+}
+
+// Agent states for office visualization (per-profile read from CLI)
+app.get('/api/office/agent-states', requireAuth, async (req, res) => {
+  try {
+    const deptData = readOfficeDepartments();
+    const departments = deptData.departments || [];
+    const agents = [];
+    const assignedNames = new Set();
+
+    // Collect all agent names to query — departments + unassigned profiles
+    const namesToQuery = [];
+    const deptLookup = {}; // name → dept info
+
+    for (const dept of departments) {
+      const members = Array.isArray(dept.members) ? dept.members : [];
+      for (const name of members) {
+        if (!name) continue;
+        assignedNames.add(name);
+        deptLookup[name] = { department: dept.name, deptColor: dept.color, deptId: dept.id };
+        namesToQuery.push(name);
+      }
+    }
+
+    // Unassigned agents
+    try {
+      const profilesDir = path.join(CONTROL_HOME, 'profiles');
+      if (fs.existsSync(profilesDir)) {
+        const dirs = fs.readdirSync(profilesDir).filter(d => {
+          const full = path.join(profilesDir, d);
+          return !d.startsWith('.') && fs.statSync(full).isDirectory()
+            && fs.existsSync(path.join(full, 'config.yaml'));
+        });
+        for (const name of dirs) {
+          if (assignedNames.has(name)) continue;
+          deptLookup[name] = { department: null, deptColor: '#666', deptId: null, unassigned: true };
+          namesToQuery.push(name);
+        }
+      }
+    } catch { /* profiles dir may not exist */ }
+
+    // FAST hybrid: config.yaml + kanban.db (no subprocess spawn)
+    // ~100ms vs ~3000ms for `hermes status`
+    const kanbanDB = openKanbanDB('main');
+    
+    for (const name of namesToQuery) {
+      const { department, deptColor, deptId, unassigned } = deptLookup[name];
+      const agent = {
+        name, department, deptColor, deptId, unassigned: !!unassigned,
+        state: 'stopped', model: 'unknown', provider: 'unknown', lastAction: null,
+        activeTasks: 0, totalTasks: 0,
+      };
+
+      try {
+        // 1. Read config.yaml for model/provider (instant file read)
+        const configPath = path.join(CONTROL_HOME, 'profiles', sanitizeProfileName(name), 'config.yaml');
+        // Default profile uses root hermes config
+        const rootConfigPath = path.join(CONTROL_HOME, 'config.yaml');
+        const readPath = (name === 'default') ? rootConfigPath : configPath;
+        if (fs.existsSync(readPath)) {
+          const cfg = yaml.load(fs.readFileSync(readPath, 'utf8'));
+          if (cfg && cfg.model) {
+            agent.model = cfg.model.default || 'unknown';
+            agent.provider = cfg.model.provider || 'unknown';
+          }
+        }
+
+        // 2. Query kanban.db for task counts (instant synchronous SQL — better-sqlite3)
+        if (kanbanDB) {
+          try {
+            const activeRow = kanbanDB.prepare(
+              "SELECT count(*) as cnt FROM tasks WHERE assignee=? AND status IN ('running','in_progress')"
+            ).get(name);
+            const blockedRow = kanbanDB.prepare(
+              "SELECT count(*) as cnt FROM tasks WHERE assignee=? AND status='blocked'"
+            ).get(name);
+            const totalRow = kanbanDB.prepare(
+              "SELECT count(*) as cnt FROM tasks WHERE assignee=?"
+            ).get(name);
+            agent.activeTasks = activeRow ? activeRow.cnt : 0;
+            agent.blockedTasks = blockedRow ? blockedRow.cnt : 0;
+            agent.totalTasks = totalRow ? totalRow.cnt : 0;
+
+            // 3. Last action from kanban task_events
+            const lastEvent = kanbanDB.prepare(
+              "SELECT kind, created_at FROM task_events WHERE task_id IN (SELECT id FROM tasks WHERE assignee=?) ORDER BY created_at DESC LIMIT 1"
+            ).get(name);
+            if (lastEvent) {
+              agent.lastAction = lastEvent.kind;
+            }
+          } catch (sqe) { /* SQL error — non-critical */ }
+        }
+
+        // 4. Check if agent gateway is alive (process or port check)
+        const gatewayAlive = checkAgentAlive(name);
+        
+        // 5. Determine state
+        if (!gatewayAlive) {
+          agent.state = 'stopped';
+        } else if (agent.blockedTasks > 0) {
+          agent.state = 'blocked';
+        } else if (agent.activeTasks > 0) {
+          agent.state = 'coding';
+        } else {
+          agent.state = 'idle';
+        }
+      } catch (e) {
+        // graceful fallback
+      }
+
+      agents.push(agent);
+    }
+
+    res.json({ ok: true, agents, timestamp: Date.now() });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// Sanitize action text — strip file paths and potential tokens
+function sanitizeAction(text) {
+  return String(text || '')
+    .replace(/\/[^\s]*\/\S*/g, '[...]')
+    .replace(/[A-Za-z0-9_-]{32,}/g, '***');
+}
+
+// Collect recent events from gateway log
+function collectOfficeEvents() {
+  const events = [];
+  const MAX = 50;
+
+  try {
+    const logPath = path.join(CONTROL_HOME, 'hermes-agent', 'logs', 'gateway.log');
+    const logPaths = [logPath];
+    // Also try standard log location
+    const altLog = '/root/.hermes/hermes-agent/gateway.log';
+    if (altLog !== logPath && fs.existsSync(altLog)) logPaths.push(altLog);
+
+    for (const lp of logPaths) {
+      if (!fs.existsSync(lp)) continue;
+      const out = require('child_process').execSync(
+        `tail -n 300 "${lp}" 2>/dev/null || true`, { encoding: 'utf8', timeout: 3000 }
+      );
+      const lines = String(out || '').split('\n').reverse();
+
+      for (const line of lines) {
+        if (events.length >= MAX) break;
+
+        const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+        if (!tsMatch) continue;
+        const timestamp = tsMatch[1];
+
+        let agent = null, action = null, emoji = null;
+
+        // Delegation
+        const d = line.match(/\[(.*?)\].*delegat(e|ing)\s*(?:to\s+)?(\S+)/i);
+        if (d) { agent = d[1]; action = `delegated to ${d[3]}`; emoji = '🔄'; }
+
+        // Tool calls
+        if (!action) {
+          const t = line.match(/\[(.*?)\].*(search_files|web_search|terminal|read_file|write_file|delegate_task|execute_code|mcp_)/i);
+          if (t) {
+            agent = t[1];
+            const m = { search_files: '🔍', web_search: '🔍', terminal: '🖥️', read_file: '📁', write_file: '📁', delegate_task: '🔄', execute_code: '⚡' };
+            emoji = m[t[2]] || '🔧';
+            action = t[2].replace(/_/g, ' ');
+          }
+        }
+
+        // Cron
+        if (!action) {
+          const c = line.match(/cron.*?["']([^"']+)["'].*?(?:complet|finish)/i);
+          if (c) { agent = 'cron'; action = `"${c[1]}" done`; emoji = '⏰'; }
+        }
+
+        // Webhook
+        if (!action) {
+          const w = line.match(/webhook.*?(?:received|trigger).*?(?:from\s+)?(\S+)/i);
+          if (w) { agent = 'webhook'; action = w[1]; emoji = '📨'; }
+        }
+
+        // Thinking
+        if (!action) {
+          const th = line.match(/\[(.*?)\].*(thinking|reasoning)/i);
+          if (th) { agent = th[1]; action = 'thinking...'; emoji = '💭'; }
+        }
+
+        if (agent && action) {
+          events.push({ timestamp, agent: agent.slice(0, 32), action: sanitizeAction(action), emoji });
+        }
+      }
+      if (events.length >= MAX) break;
+    }
+  } catch { /* log parsing is best-effort */ }
+
+  return events.slice(0, MAX);
+}
+
+// Office event timeline — admin only (may contain tool names, agent internals)
+app.get('/api/office/events', requireAuth, (req, res) => {
+  const user = getCurrentUser(req);
+  if (!user || user.role !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Forbidden: admin only' });
+  }
+
+  try {
+    let events = collectOfficeEvents();
+
+    // Fallback: if gateway logs are empty, read from kanban.db task_events
+    if (!events.length) {
+      try {
+        const db = openKanbanDB('main');
+        if (db) {
+          const rows = db.prepare(`
+            SELECT te.kind, te.payload, te.created_at, t.title, t.assignee
+            FROM task_events te
+            LEFT JOIN tasks t ON t.id = te.task_id
+            ORDER BY te.created_at DESC
+            LIMIT 50
+          `).all();
+          db.close();
+
+          events = rows.map(r => ({
+            timestamp: new Date(r.created_at * 1000).toISOString().replace('T', ' ').slice(0, 19),
+            agent: r.assignee || 'system',
+            action: `${r.kind}: ${(r.title || 'task').slice(0, 40)}`,
+            emoji: r.kind === 'completed' ? '✅' : r.kind === 'heartbeat' ? '💓' : r.kind === 'blocked' ? '⚠️' : '📋',
+          }));
+        }
+      } catch { /* best-effort */ }
+    }
+
+    res.json({ ok: true, events, timestamp: Date.now() });
+  } catch (e) {
+    res.json({ ok: false, events: [], error: e.message });
+  }
+});
+
+// ── Office v4: Kanban Board Data ────────────────────────────────────────
+
+// Open kanban.db read-only (shared across requests)
+function openKanbanDB(board) {
+  const safe = (board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+  const dbPath = path.join(CONTROL_HOME, 'kanban', 'boards', safe, 'kanban.db');
+  if (!fs.existsSync(dbPath)) return null;
+  return new Database(dbPath, { readonly: true });
+}
+
+function openKanbanDBWritable(board) {
+  const safe = (board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+  const dbPath = path.join(CONTROL_HOME, 'kanban', 'boards', safe, 'kanban.db');
+  if (!fs.existsSync(dbPath)) return null;
+  return new Database(dbPath); // writable
+}
+
+app.get('/api/office/kanban', requireAuth, (req, res) => {
+  try {
+    const board = String(req.query.board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+    const db = openKanbanDB(board);
+    if (!db) return res.json({ ok: true, board, tasks: [], links: [], columns: [] });
+
+    // 1. Query all non-archived tasks
+    const tasks = db.prepare(`
+      SELECT id, title, body, assignee, status, priority, created_by,
+             created_at, started_at, completed_at
+      FROM tasks
+      WHERE status != 'archived'
+      ORDER BY priority ASC, created_at DESC
+      LIMIT 200
+    `).all();
+
+    // 2. Query dependency links
+    const links = db.prepare(`
+      SELECT parent_id, child_id FROM task_links
+      WHERE parent_id IN (SELECT id FROM tasks WHERE status != 'archived')
+        AND child_id IN (SELECT id FROM tasks WHERE status != 'archived')
+    `).all();
+
+    // 3. Build columns — one per assignee with tasks
+    const columnMap = {};
+    for (const t of tasks) {
+      const key = t.assignee || 'unassigned';
+      if (!columnMap[key]) columnMap[key] = { assignee: key, tasks: [] };
+      columnMap[key].tasks.push(t);
+    }
+    const columns = Object.values(columnMap);
+
+    // 4. Stats
+    const statusCounts = {};
+    for (const t of tasks) {
+      statusCounts[t.status] = (statusCounts[t.status] || 0) + 1;
+    }
+
+    db.close();
+
+    res.json({
+      ok: true,
+      board,
+      tasks,
+      links,
+      columns,
+      stats: statusCounts,
+      total: tasks.length,
+      timestamp: Date.now(),
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// List available boards
+app.get('/api/office/kanban/boards', requireAuth, (req, res) => {
+  try {
+    const boardsDir = path.join(CONTROL_HOME, 'kanban', 'boards');
+    const boards = [];
+    if (fs.existsSync(boardsDir)) {
+      for (const d of fs.readdirSync(boardsDir)) {
+        const dbPath = path.join(boardsDir, d, 'kanban.db');
+        if (fs.existsSync(dbPath)) boards.push(d);
+      }
+    }
+    res.json({ ok: true, boards });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// Task detail — full info including run history, events, comments, attachments
+app.get('/api/office/kanban/:taskId', requireAuth, (req, res) => {
+  try {
+    const taskId = String(req.params.taskId).replace(/[^a-zA-Z0-9_-]/g, '');
+    const board = String(req.query.board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+    const db = openKanbanDB(board);
+    if (!db) return res.json({ ok: false, error: 'board not found' });
+
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+    if (!task) { db.close(); return res.json({ ok: false, error: 'task not found' }); }
+
+    const runs = db.prepare('SELECT * FROM task_runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 20').all(taskId);
+    const events = db.prepare('SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at DESC LIMIT 50').all(taskId);
+    const comments = db.prepare('SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 20').all(taskId);
+    const attachments = db.prepare('SELECT id, task_id, filename, content_type, size, uploaded_by, created_at FROM task_attachments WHERE task_id = ? ORDER BY created_at DESC LIMIT 20').all(taskId);
+    const links = db.prepare('SELECT * FROM task_links WHERE parent_id = ? OR child_id = ?').all(taskId, taskId);
+
+    db.close();
+
+    res.json({
+      ok: true,
+      task,
+      runs: runs.map(r => ({ ...r, metadata: r.metadata ? JSON.parse(r.metadata) : null })),
+      events,
+      comments,
+      attachments,
+      links,
+      timestamp: Date.now(),
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// ── Quick actions on kanban tasks (triage from Office) ──
+app.post('/api/office/kanban/:taskId/action', requireAuth, requireCsrf, (req, res) => {
+  try {
+    const taskId = String(req.params.taskId).replace(/[^a-zA-Z0-9_-]/g, '');
+    const board = String(req.query.board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+    const { action, assignee } = req.body || {};
+    const now = Math.floor(Date.now() / 1000);
+
+    const db = openKanbanDBWritable(board);
+    if (!db) return res.json({ ok: false, error: 'board not found' });
+
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+    if (!task) { db.close(); return res.json({ ok: false, error: 'task not found' }); }
+
+    const validActions = {
+      unblock:  () => db.prepare('UPDATE tasks SET status=?, completed_at=NULL WHERE id=?').run('ready', taskId),
+      done:     () => db.prepare('UPDATE tasks SET status=?, completed_at=? WHERE id=?').run('done', now, taskId),
+      reopen:   () => db.prepare('UPDATE tasks SET status=?, completed_at=NULL, started_at=NULL WHERE id=?').run('todo', taskId),
+      start:    () => db.prepare('UPDATE tasks SET status=?, started_at=? WHERE id=?').run('running', now, taskId),
+      reassign: () => {
+        const newAssignee = String(assignee || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+        if (!newAssignee) return { error: 'assignee is required for reassign' };
+        return db.prepare('UPDATE tasks SET assignee=? WHERE id=?').run(newAssignee, taskId);
+      },
+    };
+
+    if (!validActions[action]) { db.close(); return res.json({ ok: false, error: `unknown action: ${action}. valid: ${Object.keys(validActions).join(', ')}` }); }
+
+    const result = validActions[action]();
+    db.close();
+
+    if (result?.error) return res.json({ ok: false, error: result.error });
+
+    res.json({ ok: true, action, taskId, board });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
 });
 
 app.get('/api/avatar', requireAuth, (req, res) => {
