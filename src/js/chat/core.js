@@ -610,10 +610,9 @@ function renderChatMessage(msg) {
     }
   }
 
-  // Tool result content
+  // Tool result content — collapsed by default for consistency with the
+  // reasoning panel below; long tool outputs otherwise dominate the chat.
   if (role === 'tool') {
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'msg-tool-result';
     let content = msg.content;
     try {
       const parsed = JSON.parse(content);
@@ -621,8 +620,22 @@ function renderChatMessage(msg) {
       else if (parsed.results) content = JSON.stringify(parsed.results, null, 2);
       else content = JSON.stringify(parsed, null, 2);
     } catch {}
-    contentDiv.textContent = toDisplayText(content).substring(0, 2000);
-    div.appendChild(contentDiv);
+    const text = toDisplayText(content).substring(0, 2000);
+    const firstLine = text.split('\n')[0].slice(0, 120);
+    const details = document.createElement('details');
+    details.style.cssText = 'margin-top:4px;';
+    const summary = document.createElement('summary');
+    summary.style.cssText = 'cursor:pointer;font-size:11px;color:var(--fg-subtle);';
+    const labelText = msg.tool_name ? `⚡ ${msg.tool_name}` : '⚡ Tool Result';
+    const preview = firstLine ? ` — ${firstLine}${text.length > firstLine.length ? '…' : ''}` : '';
+    summary.textContent = labelText + preview;
+    const body = document.createElement('div');
+    body.className = 'msg-tool-result';
+    body.style.cssText = 'margin-top:4px;';
+    body.textContent = text;
+    details.appendChild(summary);
+    details.appendChild(body);
+    div.appendChild(details);
     return div;
   }
 
