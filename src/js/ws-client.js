@@ -2,7 +2,6 @@
  * HCI WebSocket Client
  * Manages connection, auto-reconnect, and event routing.
  */
-
 class HciWsClient extends EventTarget {
   constructor() {
     super();
@@ -14,12 +13,10 @@ class HciWsClient extends EventTarget {
     this.pingInterval = null;
     this.lastPong = 0;
   }
-
   connect() {
     if (this.socket?.readyState === WebSocket.OPEN) return;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${location.host}/ws`;
-
     try {
       this.socket = new WebSocket(url);
     } catch (e) {
@@ -27,7 +24,6 @@ class HciWsClient extends EventTarget {
       this.scheduleReconnect();
       return;
     }
-
     this.socket.onopen = () => {
       console.log('[WS] connected');
       this.connected = true;
@@ -36,7 +32,6 @@ class HciWsClient extends EventTarget {
       this.startPing();
       this.dispatchEvent(new CustomEvent('open'));
     };
-
     this.socket.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
@@ -47,7 +42,6 @@ class HciWsClient extends EventTarget {
         this.dispatchEvent(new CustomEvent('message', { detail: msg }));
       } catch {}
     };
-
     this.socket.onclose = () => {
       console.log('[WS] disconnected');
       this.connected = false;
@@ -55,13 +49,11 @@ class HciWsClient extends EventTarget {
       this.dispatchEvent(new CustomEvent('close'));
       this.scheduleReconnect();
     };
-
     this.socket.onerror = (err) => {
       console.error('[WS] error:', err);
       this.dispatchEvent(new CustomEvent('error', { detail: err }));
     };
   }
-
   scheduleReconnect() {
     if (this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(() => {
@@ -71,7 +63,6 @@ class HciWsClient extends EventTarget {
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
     }, this.reconnectDelay);
   }
-
   startPing() {
     this.stopPing();
     this.pingInterval = setInterval(() => {
@@ -85,11 +76,9 @@ class HciWsClient extends EventTarget {
       }
     }, 10000);
   }
-
   stopPing() {
     if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
   }
-
   send(data) {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(data));
@@ -97,35 +86,27 @@ class HciWsClient extends EventTarget {
     }
     return false;
   }
-
   chatStart({ message, profile, session_id, model }) {
     return this.send({ type: 'chat.start', message, profile, session_id, model });
   }
-
   chatSend({ message, session_id }) {
     return this.send({ type: 'chat.send', message, session_id });
   }
-
   chatStop() {
     return this.send({ type: 'chat.stop' });
   }
-
   clarifyRespond(request_id, text, choice) {
     return this.send({ type: 'clarify.respond', request_id, text, choice });
   }
-
   approvalRespond(approve, command) {
     return this.send({ type: 'approval.respond', approve, command });
   }
-
   sudoRespond(request_id, password) {
     return this.send({ type: 'sudo.respond', request_id, password });
   }
-
   secretRespond(request_id, value) {
     return this.send({ type: 'secret.respond', request_id, value });
   }
-
   disconnect() {
     this.stopPing();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
@@ -133,6 +114,5 @@ class HciWsClient extends EventTarget {
     this.connected = false;
   }
 }
-
 // Singleton instance
 export const wsClient = new HciWsClient();

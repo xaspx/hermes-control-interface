@@ -530,3 +530,120 @@ Resets avatar to the default photo. Triggers a WebSocket broadcast.
 ```json
 { "type": "pong", "ts": 1712600000000 }
 ```
+
+---
+
+## Office v3 API
+
+### `GET /api/office/kanban?board=main`
+
+**Auth required:** Yes
+
+Returns the full kanban board for a given board name.
+
+```json
+{
+  "ok": true,
+  "tasks": [{ "id": "t_...", "title": "...", "status": "done", "assignee": "david", ... }],
+  "links": [{ "parent_id": "t_...", "child_id": "t_..." }]
+}
+```
+
+### `GET /api/office/kanban/:taskId?board=main`
+
+**Auth required:** Yes
+
+Returns a single task with full detail — runs, events, comments, attachments, links.
+
+```json
+{
+  "ok": true,
+  "task": { "id": "t_...", "title": "...", "status": "done", ... },
+  "runs": [{ "id": 1, "status": "done", "outcome": "completed", "summary": "...", "metadata": {...} }],
+  "events": [{ "id": 1, "kind": "created", "payload": {...}, "created_at": ... }],
+  "comments": [{ "id": 1, "author": "david", "body": "Fixed the issue", "created_at": ... }],
+  "attachments": [{ "id": 1, "filename": "report.md", "size": 2048 }],
+  "links": [{ "parent_id": "t_...", "child_id": "t_..." }]
+}
+```
+
+### `GET /api/office/kanban/:taskId/workspace-file?board=main&path=file.py`
+
+**Auth required:** Yes
+
+Reads a file from the task's workspace directory. Path traversal protected.
+
+**Directory listing** (path ends with `.` or is a directory):
+```json
+{
+  "ok": true,
+  "files": [{ "name": "script.py", "size": 15733, "isDir": false, "mtime": ... }],
+  "isDir": true
+}
+```
+
+**File content** (max 500KB, auto-detects language):
+```json
+{
+  "ok": true,
+  "filename": "script.py",
+  "size": 15733,
+  "language": "py",
+  "content": "#!/usr/bin/env python3\n..."
+}
+```
+
+### `POST /api/office/kanban/:taskId/action?board=main`
+
+**Auth required:** Yes (CSRF required)
+
+Quick actions on tasks. Body: `{ "action": "...", "assignee": "..." }`
+
+Valid actions: `unblock`, `done`, `reopen`, `start`, `reassign`
+
+```json
+{ "ok": true, "action": "done", "taskId": "t_...", "board": "main" }
+```
+
+### `GET /api/office/agent-states`
+
+**Auth required:** Yes
+
+Returns agent health grid — model, provider, active/blocked tasks, gateway alive.
+
+```json
+{
+  "ok": true,
+  "agents": [{ "name": "david", "model": "deepseek-v4-pro", "state": "idle", "activeTasks": 0, "blockedTasks": 0 }],
+  "timestamp": 1712600000000
+}
+```
+
+### `GET /api/office/events`
+
+**Auth required:** Admin only
+
+Returns live feed events from gateway logs (max 50).
+
+```json
+{
+  "ok": true,
+  "events": [{ "timestamp": "2026-06-03 14:22:10", "agent": "david", "action": "web_search", "emoji": "🔍" }]
+}
+```
+
+### `GET /api/office/summary?board=main`
+
+**Auth required:** Yes
+
+Board-level statistics with agent breakdown and recommendations.
+
+```json
+{
+  "ok": true,
+  "overview": { "total": 19, "running": 1, "blocked": 1, "done": 13 },
+  "agents": [{ "name": "david", "active": 1, "done": 5 }],
+  "alerts": ["⚠️ 1 task blocked"],
+  "recommendations": ["Review blocked task t_..."]
+}
+```

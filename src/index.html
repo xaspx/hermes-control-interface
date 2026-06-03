@@ -6,6 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#1a1a2e" />
+  <link rel="manifest" href="/manifest.json" />
   <title data-i18n="appTitle">Hermes Control Interface</title>
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -48,18 +49,19 @@
       </div>
       <nav class="topbar-nav" id="nav">
         <a href="#home" class="nav-link active" data-page="home" data-i18n="topbar.home">Home</a>
-        <a href="#agents" class="nav-link" data-page="agents" data-i18n="topbar.agents">Agents</a>
-        <a href="#usage" class="nav-link" data-page="usage" data-i18n="topbar.usage">Usage</a>
-        <a href="#skills" class="nav-link" data-page="skills" data-i18n="topbar.skills">Skills</a>
         <a href="#chat" class="nav-link" data-page="chat" data-i18n="topbar.chat">Chat</a>
-        <a href="#logs" class="nav-link" data-page="logs" data-i18n="topbar.logs">Logs</a>
-        <a href="#mon" class="nav-link" data-page="mon" data-i18n="topbar.monitor">Monitor</a>
-        <a href="#maintenance" class="nav-link" data-page="maintenance" data-i18n="topbar.maintenance">Maintenance</a>
-        <a href="#files" class="nav-link" data-page="files" data-i18n="topbar.files">Files</a>
+        <a href="#agents" class="nav-link" data-page="agents" data-i18n="topbar.agents">Agents</a>
         <a href="#office" class="nav-link" data-page="office" data-i18n="topbar.office">Office</a>
+        <a href="#mon" class="nav-link" data-page="mon" data-i18n="topbar.monitor">Monitor</a>
+        <a href="#usage" class="nav-link" data-page="usage" data-i18n="topbar.usage">Usage</a>
+        <a href="#logs" class="nav-link" data-page="logs" data-i18n="topbar.logs">Logs</a>
+        <a href="#skills" class="nav-link" data-page="skills" data-i18n="topbar.skills">Skills</a>
+        <a href="#files" class="nav-link" data-page="files" data-i18n="topbar.files">Files</a>
+        <a href="#mcp" class="nav-link" data-page="mcp" data-i18n="topbar.mcp">MCP</a>
+        <a href="#maintenance" class="nav-link" data-page="maintenance" data-i18n="topbar.maintenance">Maintenance</a>
       </nav>
       <div class="topbar-right">
-        <button class="icon-btn" id="notif-btn" title="Notifications" data-i18n-title="topbar.notifications">
+        <button class="icon-btn" id="notif-btn" title="Notifications" data-i18n-title="topbar.notifications" onclick="toggleNotifDropdown()">
           <span class="notif-icon">🔔</span>
           <span class="notif-badge" id="notif-badge" style="display:none;">0</span>
         </button>
@@ -67,7 +69,7 @@
           <span id="theme-icon">🌙</span>
         </button>
         <div class="user-menu" id="user-menu">
-          <button class="user-btn" id="user-btn">
+          <button class="user-btn" id="user-btn" onclick="toggleUserDropdown()">
             <span id="user-name">admin</span>
             <span class="user-role" id="user-role">admin</span>
           </button>
@@ -103,6 +105,7 @@
       <div id="page-maintenance" class="page"></div>
       <div id="page-files" class="page"></div>
       <div id="page-office" class="page"></div>
+      <div id="page-mcp" class="page"></div>
     </main>
   </div>
 

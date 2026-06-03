@@ -24,16 +24,19 @@ export async function initI18n() {
   document.documentElement.lang = _locale;
 }
 
+const I18N_VERSION = '3.6.0';
+
 async function loadLocale(loc) {
+  const url = '/i18n/' + loc + '.json?v=' + I18N_VERSION;
   try {
-    const res = await fetch('/i18n/' + loc + '.json', { cache: 'no-cache' });
+    const res = await fetch(url, { cache: 'no-cache' });
     if (!res.ok) throw new Error('locale fetch failed');
     _dict = await res.json();
   } catch (e) {
     console.warn('i18n: fallback to en', e);
     if (loc !== 'en') {
       _locale = 'en';
-      const res = await fetch('/i18n/en.json', { cache: 'no-cache' });
+      const res = await fetch('/i18n/en.json?v=' + I18N_VERSION, { cache: 'no-cache' });
       _dict = await res.json();
     } else {
       _dict = {};

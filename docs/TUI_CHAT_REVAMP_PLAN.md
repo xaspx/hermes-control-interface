@@ -49,7 +49,7 @@ Browser (HCI) ←──WSS──→ Node Backend ←──JSON-RPC──→ Pyth
 - **Tool progress** — inline badges "⚡ Using terminal..." expand on click
 - **Status bar** — bottom sticky: model, status, tokens, context usage
 - **Input area** — sticky bottom, auto-expand textarea, send + stop
-- **System messages** — center-aligned, muted ("Pxnji changed the model")
+- **System messages** — center-aligned, muted ("User changed the model")
 
 ### Responsive Breakpoints
 

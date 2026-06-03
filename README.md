@@ -1,680 +1,189 @@
 # Hermes Control Interface
 
-A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Manage terminals, files, sessions, cron jobs, token analytics, multi-agent gateways, and team access — all behind a password gate.
+A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Manage agents, chat, terminals, files, cron, token analytics, MCP servers, and swarm pipelines — behind a password gate.
 
-**Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js
-**Version:** 3.5.0
+**Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js · Chart.js · better-sqlite3  
+**Version:** 3.6.0 · **License:** MIT
 
 ---
 
-## Highlights
+## Quick Start
 
-> **Chat via Gateway API** — Real-time streaming, tool call cards with JSON viewer, session resume, stop button, multi-profile support. Auto-fallback to CLI.
+```bash
+git clone https://github.com/xaspx/hermes-control-interface.git
+cd hermes-control-interface
+cp .env.example .env     # set HERMES_CONTROL_PASSWORD + HERMES_CONTROL_SECRET
+npm install && npm run build
+node server.js            # → http://localhost:10274
+```
 
-> **RBAC v2** — 20 permissions across 3 roles. Admin, viewer, or custom roles per user.
+See [docs/INSTALL.md](docs/INSTALL.md) for production setup, nginx, and systemd.
 
-> **Multi-Agent Gateway** — Start/stop/configure multiple Hermes profiles. Real-time logs. Systemd service management.
+---
 
-> **Token Analytics** — Track sessions, messages, tokens, cost by model, platform, and time range.
+## Overview
 
-> **Security Hardened** — Command injection fixes, CSRF on 21 endpoints, dynamic CORS, comprehensive XSS protection (escapeHtml on all error handlers), 18 findings addressed.
+| Page | What |
+|------|------|
+| **Home** | System health, agent overview, gateway status, token usage |
+| **Chat** | Real-time streaming via gateway API, tool call cards, multi-profile |
+| **Agents** | Profile CRUD, gateway lifecycle, per-agent dashboard/sessions/cron |
+| **Office** | 3-panel swarm monitor — agent health, kanban pipeline, live feed |
+| **Monitor** | Gateway logs, CPU/RAM metrics, live process view |
+| **Usage** | Token analytics, daily trends, cost projections, budget alerts |
+| **Logs** | Agent, error, and gateway logs with level filter |
+| **Skills** | Browse, install, and remove Hermes skills |
+| **Files** | Browse and edit files on the server |
+| **MCP** | MCP server control plane — start, stop, restart, log tail, config editor |
+| **Maintenance** | Backup, restore, HCI update, system doctor |
 
 ---
 
 ## Screenshots
 
-### Navigation — 8 Pages
+### Core Pages · Dark Mode
 
-**Home · Agents · Usage · Skills · Chat · Logs · Maintenance · Files**
+| | | |
+|-|-|-|
+| Home | Chat | Office |
+| ![Home](docs/screenshots/dark/01-home.png) | ![Chat](docs/screenshots/dark/chat.png) | ![Office](docs/screenshots/dark/office.png) |
+| Agents | MCP Manager | Usage |
+| ![Agents](docs/screenshots/dark/02-agents.png) | ![MCP](docs/screenshots/dark/mcp.png) | ![Usage](docs/screenshots/dark/03-usage.png) |
 
-### Dark Mode
+### Agent Detail Pages
 
-| Home | Agents |
-|------|--------|
-| ![Home](docs/screenshots/dark/01-home.png) | ![Agents](docs/screenshots/dark/02-agents.png) |
-
-| Chat | Usage & Analytics |
-|------|------------------|
-| ![Chat](docs/screenshots/dark/chat.png) | ![Usage](docs/screenshots/dark/03-usage.png) |
-
-| Skills Hub | Maintenance |
-|------------|-------------|
-| ![Skills](docs/screenshots/dark/04-skills.png) | ![Maintenance](docs/screenshots/dark/05-maintenance.png) |
-
-| File Explorer | Agent Dashboard |
-|---------------|----------------|
-| ![Files](docs/screenshots/dark/06-files.png) | ![Dashboard](docs/screenshots/dark/07-agent-dashboard.png) |
-
-| Agent Gateway | Agent Sessions |
-|---------------|----------------|
-| ![Gateway](docs/screenshots/dark/09-agent-gateway.png) | ![Sessions](docs/screenshots/dark/08-agent-sessions.png) |
-
-| Agent Config | Agent Memory |
-|---------------|--------------|
-| ![Config](docs/screenshots/dark/10-agent-config.png) | ![Memory](docs/screenshots/dark/11-agent-memory.png) |
-
-| Agent Skills | Agent Cron |
-|--------------|------------|
-| ![Skills](docs/screenshots/dark/12-agent-skills.png) | ![Cron](docs/screenshots/dark/13-agent-cron.png) |
-
-### Light Mode
-
-| Home | Agents | Skills Hub |
-|------|--------|------------|
-| ![Home](docs/screenshots/light/01-home.png) | ![Agents](docs/screenshots/light/02-agents.png) | ![Skills](docs/screenshots/light/04-skills.png) |
-
-| Gateway | Memory |
-|---------|--------|
-| ![Gateway](docs/screenshots/light/09-agent-gateway.png) | ![Memory](docs/screenshots/light/11-agent-memory.png) |
+| | | |
+|-|-|-|
+| Dashboard | Sessions | Gateway |
+| ![Dashboard](docs/screenshots/dark/07-agent-dashboard.png) | ![Sessions](docs/screenshots/dark/08-agent-sessions.png) | ![Gateway](docs/screenshots/dark/09-agent-gateway.png) |
+| Config | Memory | Skills |
+| ![Config](docs/screenshots/dark/10-agent-config.png) | ![Memory](docs/screenshots/dark/11-agent-memory.png) | ![Skills](docs/screenshots/dark/12-agent-skills.png) |
 
 ---
 
 ## Features
 
-### 🔐 Authentication
+### Office v3 — ZOO Swarm Monitor
 
-- Single password login (configurable via `HERMES_CONTROL_PASSWORD`)
-- bcrypt password hashing (cost factor 10)
-- CSRF tokens on all mutating requests
-- Conditional Secure cookie flag (auto-detects HTTPS)
-- Rate limiting: 5 failed logins per 15 minutes per IP
-- Multi-user support with role-based access control (RBAC)
+Three-panel dashboard with zero-subprocess agent states (~100ms vs 3000ms):
 
----
+- **Agents Panel** — health grid via config.yaml + kanban.db
+- **Kanban Panel** — 8 status lanes (triage→done), dependency arrows, board switcher
+- **Live Feed** — 50 events from gateway logs, agent filter dropdown, keyword search
+- **Task Popup** — expandable run history, workspace file browser, event enrichment, timeline, load-more
 
-### 🏠 Home Dashboard
+### Chat
 
-System overview at a glance:
-- **System Health**: CPU usage, RAM usage, Disk usage, Uptime
-- **Agent Overview**: active model, provider, gateway status, configured API keys, active platforms
-- **Gateway Status**: per-profile running/stopped indicators
-- **Token Usage (7d)**: sessions count, messages, total tokens, estimated cost, models used, platforms breakdown, top tools
+- Real-time streaming via WebSocket gateway API
+- Multi-profile support with profile switcher
+- Tool call cards with collapsible JSON viewer
+- Stop button, session resume, fork from message
 
----
+### MCP Manager
 
-### 🤖 Agents — Multi-Agent Management
+Full operational control plane — list, start, stop, restart MCP servers. Live log tail and config editor from the browser. 11 REST API routes.
 
-Manage all Hermes profiles from one place:
-- List all profiles with status badge (running/stopped) and active model
-- Create new profile
-- Clone existing profile
-- Delete profile
-- Set default profile
-- Start/Stop/Restart gateway per profile
-- Quick gateway log viewer
+### Security
 
----
+- CSP without `unsafe-eval`, CSRF on all mutating endpoints
+- Rate limiting (global + chat), WebSocket RBAC
+- Path traversal prevention, XSS protection
+- 20 permissions across 3 roles (admin, viewer, custom)
 
-### 💬 Chat — Revamped Interface
+### PWA
 
-The chat interface got a full overhaul in v3.3.0:
-
-**Tool Call Cards**
-- Each tool call displayed as a collapsible card
-- Shows tool name, status (running/success/error), and execution time
-- Expand to see full JSON input/output
-- Collapsed by default for clean output
-
-**Session Sidebar**
-- List of past chat sessions with timestamps
-- Resume any session with one click
-- New chat button for fresh session
-- Shows active model tag
-
-**Clean Output**
-- Banner suppression (`-Q` flag) for noise-free responses
-- Auto-detects both new (`session_id:`) and legacy (`Session:`) session ID formats
-- `--continue ""` (empty) creates new session
-- Bare `--continue` resumes last session
-
-**Session Management**
-- Rename sessions
-- Delete sessions
-- Export session transcript
-
----
-
-### 📊 Usage & Analytics — Token Insights
-
-Full breakdown of LLM usage:
-- **Time Range**: Today, 7d, 30d, 90d filters
-- **Agent Filter**: per-profile or all combined
-- **Overview Cards**: total sessions, messages, tokens, cost, active hours
-- **Models Table**: per-model breakdown — sessions count, total tokens, avg tokens/session
-- **Platforms Table**: per-platform breakdown (CLI, Telegram, WhatsApp, etc.)
-- **Top Tools**: most called tools with call counts and success rates
-
----
-
-### 🛠️ Agent Detail — Per-Agent Management
-
-Six-tab interface for deep agent configuration:
-
-#### Dashboard Tab
-- Agent identity: name, model, provider
-- Gateway service status
-- Quick token usage summary
-- Active platforms
-
-#### Sessions Tab
-- List all sessions for this profile
-- Search by keyword
-- Rename session
-- Delete session
-- Export session (JSON format)
-- Resume session in CLI (one click)
-
-#### Gateway Tab
-- Start/Stop/Restart gateway service
-- Real-time log stream (WebSocket)
-- Systemd service management (for non-root users: `hermes-gateway-<profile>`)
-- Gateway configuration panel
-
-#### Config Tab
-- 13 categories, 80+ settings
-- Structured form editor with labeled fields
-- Raw YAML editor toggle
-- Reset to defaults per category
-- Apply changes with validation
-
-#### Memory Tab
-- Dynamic memory provider panel
-- Provider options: Built-in MEMORY.md, Honcho (self-hosted), External providers
-- Honcho status: connected/disconnected
-- Memory usage stats
-
-#### Cron Tab
-- List all scheduled jobs for this profile
-- Create new cron job with schedule presets (hourly, daily, weekly, custom cron expression)
-- Pause/Resume scheduled jobs
-- Run job immediately (on-demand)
-- Edit/Delete cron jobs
-- Next run time display
-
----
-
-### 📦 Skills Marketplace
-
-Browse and manage installed Hermes skills:
-- Grouped by category (devops, mlops, creative, etc.)
-- Shows skill name, description snippet, source (builtin/local), trust level
-- Search and filter skills
-- Install new skills from the Hermes skills registry
-- Check for updates
-- Uninstall skills
-
----
-
-### 🔧 Maintenance — System Administration
-
-Full admin panel:
-- **Doctor**: Run diagnostics — detects common issues, auto-fix where possible
-- **Dump**: Generate debug summary (system info, config, recent logs)
-- **Update**: Update Hermes agent to latest version
-- **Backup**: Download all Hermes data as a zip file
-- **Import**: Restore from backup zip
-- **HCI Restart**: Restart the Control Interface web server from UI (no SSH needed)
-- **Users** (NEW in v3.3.0): Create/edit/delete users, assign roles, manage permissions
-- **Auth**: View provider status (OpenRouter, Nous Portal, etc.), add/remove API keys
-- **Audit**: Timestampped activity log — who did what and when
-
----
-
-### 📁 File Explorer
-
-Split-view file editor:
-- **Left panel**: Directory tree browser
-- **Right panel**: Text editor with syntax highlighting
-- **Save**: Write changes back to disk
-- **Secure**: Paths scoped to `~/.hermes`, traversal attacks prevented
-- **Multiple roots**: Configurable via `HERMES_CONTROL_ROOTS`
-
----
-
-### 💻 Terminal
-
-Real browser-based terminal:
-- Full PTY via node-pty + xterm.js over WebSocket
-- Touch-friendly controls (↑↓␣↵) for mobile
-- Fullscreen toggle
-- Auto-cleanup flow: Ctrl+C → clear → ready for next command
-- Rate limited: 30 commands/minute per IP
-
----
-
-### 🔔 Notifications
-
-- Bell icon with unread count badge (top-right)
-- Dropdown panel with notification list
-- Dismiss individual or clear all
-- Sources: system alerts (disk/RAM/CPU), gateway events, session CRUD, user management
-- Persistent: stored in `~/.hermes/hci-notifications.json`
-
----
-
-### 🎨 Theme
-
-- **Dark mode** (default): `#0b201f` background, `#dccbb5` foreground, `#7c945c` accent
-- **Light mode**: `#e4ebdf` background, `#0b201f` foreground, `#2e6fb0` accent
-- Toggle via header button
-- Preference persisted in localStorage
-- Login page: themed background image with overlay
-
----
-
-### 🔒 Security
-
-- **Multi-user RBAC**: 20 permissions across 3 roles
-- **Roles**: `admin` (full access), `viewer` (read-only), `custom` (your choice)
-- **bcrypt** password hashing (cost factor 10)
-- **CSRF tokens** on all mutating requests
-- **Secure cookie** flag (auto-detects HTTPS)
-- **WebSocket origin** verification (exact match)
-- **Input sanitization**: strict regex on all user inputs (profiles, sessions, titles, filenames)
-- **Path traversal prevention** in file explorer
-- **Rate limiting**: login (5 failed/15min), terminal exec (30/min)
-- **XSS protection**: all dynamic values escaped via escapeHtml() — code blocks extracted before render, error messages sanitized in all 15+ catch blocks
-- **Admin gate**: critical endpoints (`/api/plugins`, etc.) require admin role
-- **Token cleanup**: automatic session token cleanup every 15 minutes
-- **Unhandled exception handlers**: `unhandledRejection` + `uncaughtException` caught and logged
-
-See full security audit: [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)
-
----
-
-## Where HCI Can Be Installed
-
-HCI runs as a single Node.js process — any server environment that supports Node.js works.
-
-| Environment | Status | Notes |
-|---|---|---|
-| Local Linux server | ✅ | Full support |
-| VPS (DigitalOcean, Hetzner, AWS EC2, Linode, etc.) | ✅ | Recommended for production |
-| macOS | ✅ | Works |
-| WSL2 (Windows Subsystem for Linux) | ✅ | Full support |
-| Raspberry Pi (arm64) | ✅ | Works |
-| Docker / Podman | ⚠️ | Works but not officially supported |
-| Shared hosting | ❌ | Requires Node.js + WebSocket + PTY support |
-| Browser-only (no server) | ❌ | Requires Node.js backend |
-
----
-
-## Requirements
-
-| Requirement | Minimum | Recommended |
-|---|---|---|
-| Node.js | v18+ | v20 LTS |
-| RAM | 512 MB | 1 GB+ |
-| Disk | 200 MB | 500 MB+ |
-| OS | Linux / macOS / WSL2 | Ubuntu 22.04 LTS |
-| Hermes Agent | v0.3.x | Latest |
-| Build tools | python3, make, g++ | For node-pty native module |
-
-**Dependencies** (installed via `npm install`):
-- `express` — HTTP server
-- `ws` — WebSocket
-- `node-pty` — PTY support (requires build tools)
-- `xterm.js` — Terminal emulator in browser
-- `bcrypt` — Password hashing
-- `cookie-parser`, `dotenv`, `js-yaml`, etc.
-
----
-
-## Installation Methods
-
-### Manual (Recommended)
-
-```bash
-# 1. Clone
-git clone https://github.com/xaspx/hermes-control-interface.git
-cd hermes-control-interface
-
-# 2. Install dependencies
-npm install
-
-# 3. Configure
-cp .env.example .env
-# Edit .env and set:
-#   HERMES_CONTROL_PASSWORD=your-secure-password
-#   HERMES_CONTROL_SECRET=$(openssl rand -hex 32)
-
-# 4. Build frontend
-npm run build
-
-# 5. Start
-npm start
-```
-
-Access at `http://localhost:10272` (default PORT).
-
-### Systemd Service (Production)
-
-```bash
-# Use the provided gateway service script as reference
-bash scripts/setup-gateway-service.sh
-```
-
-Or create a simple systemd unit:
-
-```ini
-# /etc/systemd/system/hermes-control.service
-[Unit]
-Description=Hermes Control Interface
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/path/to/hermes-control-interface
-ExecStart=/usr/bin/node server.js
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable hermes-control
-sudo systemctl start hermes-control
-```
-
----
-
-
-## Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `HERMES_CONTROL_PASSWORD` | Yes | Login password |
-| `HERMES_CONTROL_SECRET` | Yes | CSRF + internal auth secret |
-| `PORT` | No | Server port (default: 10272) |
-| `HERMES_CONTROL_HOME` | No | Hermes home dir (default: ~/.hermes) |
-| `HERMES_CONTROL_ROOTS` | No | File explorer roots (JSON array) |
-| `HERMES_PROJECTS_ROOT` | No | Projects directory |
-
----
-
-## Reset Password Without Dashboard Access
-
-If you can't log in to the dashboard, reset the password via CLI:
-
-**Option 1 — Edit .env directly**
-```bash
-# SSH into your server
-nano ~/.hermes/.env
-# Change HERMES_CONTROL_PASSWORD=your-new-password
-
-# Restart
-sudo systemctl restart hermes-control
-# or: pkill node; npm start &
-```
-
-**Option 2 — Generate bcrypt hash via Node.js**
-```bash
-node -e "const bcrypt=require('bcrypt'); bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10).then(h=>console.log('HERMES_CONTROL_PASSWORD='+h))"
-# Copy the output to .env, then restart
-```
-
-**Key point:** `.env` is the source of truth. Dashboard access = server access. If you lose access to both, you must have server/SSH access to reset.
+Installable to homescreen. Service worker with offline caching. Auto-update on new version.
 
 ---
 
 ## Architecture
 
 ```
-src/                    # Vite source (ES modules)
-├── index.html          # Entry point
-├── js/main.js          # App logic (~4800 lines, modular sections)
-├── css/
-│   ├── theme.css       # Color palette (dark/light)
-│   ├── layout.css      # Topbar, modals, dropdowns, sidebar
-│   └── components.css  # Cards, tables, forms, editor, file explorer
-├── public/
-│   └── favicon.svg     # Served unhashed
-└── assets/             # SVG icons
-
-dist/                   # Vite build output (served by Express)
-server.js               # Express + WebSocket + PTY + API (~2300 lines)
-auth.js                 # Multi-user auth + RBAC (bcrypt, sessions, permissions)
+Browser (11 pages, SPA)
+       │
+   HTTPS :10274
+       │
+   Express Server (server.js — 6.4K lines)
+       ├── Auth (bcrypt, sessions, CSRF)
+       ├── RBAC (20 permissions, 3 roles)
+       ├── REST API (30+ routes)
+       ├── WebSocket (real-time)
+       │
+       ├── Hermes CLI (agent states, gateway control)
+       ├── SQLite (kanban.db — task pipeline)
+       ├── Filesystem (config.yaml, logs, skills)
+       └── External (MCP servers, token pricing)
 ```
 
----
-
-## Development
-
-```bash
-# Edit source in src/
-npx vite build
-
-# Restart (never in foreground — use detached)
-kill $(lsof -t -i:10272) 2>/dev/null
-nohup node server.js &>/dev/null & disown
-```
+Full architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ---
 
 ## API
 
-100+ endpoints covering:
-- **Auth**: login, logout, session management, setup
-- **Users**: CRUD, role assignment, permission management, reset password
-- **Sessions**: list, rename, delete, export, resume
-- **Profiles**: list, create, clone, delete, use, gateway control
-- **Chat**: send message, stream response, tool calls
-- **Cron**: list, create, pause, resume, run, remove
-- **Config**: read, write, YAML parsing, reset
-- **Memory**: provider-specific panels (MEMORY.md, honcho, external)
-- **Skills**: list, parse, search, install, uninstall, check updates
-- **Files**: list, read, write, save (scoped to Hermes home)
-- **System**: health, insights, usage analytics, doctor, dump, update, backup
-- **Notifications**: list, dismiss, clear
-- **Plugins**: admin-only plugin management
-- **Terminal**: exec command via PTY
-- **Audit**: activity log
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /api/office/kanban?board=` | Login | Kanban board with tasks + links |
+| `GET /api/office/kanban/:id?board=` | Login | Task detail with runs, events, comments |
+| `GET /api/office/kanban/:id/workspace-file?board=&path=` | Login | Read workspace files (code, logs) |
+| `POST /api/office/kanban/:id/action?board=` | Login+CSRF | Quick actions (done, start, reopen, etc.) |
+| `GET /api/office/agent-states` | Login | Agent health grid |
+| `GET /api/office/events` | Admin | Live feed from gateway logs |
+| `GET /api/office/summary?board=` | Login | Board stats + recommendations |
 
-See `docs/API.md` for full reference.
+Full API: [docs/API.md](docs/API.md)
 
 ---
 
-**Security Audit**
+## Configuration
 
-Full audit report: [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)
-**Score: 7.5/10** — Production-ready.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HERMES_CONTROL_PASSWORD` | — | Login password (bcrypt hashed) |
+| `HERMES_CONTROL_SECRET` | — | Session secret (random string) |
+| `PORT` | `10274` | Server port |
+| `HERMES_CONTROL_HOME` | `~/.hermes` | Hermes state directory |
+| `HERMES_PROJECTS_ROOT` | parent of repo | Projects directory |
 
-Issues found and fixed in v3.3.0 and later:
-- XSS in home cards (`loadHomeCards()`) — fixed with `escapeHtml()`
-- XSS in error handlers (15+ locations) — all `e.message` now sanitized in innerHTML (v3.5.0)
-- Missing admin gate on plugins API — fixed
-- Terminal exec rate limit — 30 commands/minute per IP
-- Token cleanup interval — now runs every 15 minutes
+Full config: [docs/CONFIG.md](docs/CONFIG.md)
 
 ---
 
-## Updating HCI
+## Requirements
+
+- Node.js 20+
+- Hermes Agent installed on the same machine
+- `hermes` CLI available on PATH
+
+---
+
+## Updating
 
 ```bash
-# 1. Pull latest code
-cd /root/projects/hermes-control-interface
 git pull origin main
-
-# 2. Install dependencies (if package.json changed)
 npm install
-
-# 3. Rebuild frontend
 npm run build
-
-# 4. Restart production server
-kill $(lsof -t -i :10272) 2>/dev/null
-nohup node server.js &>/dev/null & disown
+systemctl restart hci-staging
 ```
 
-Or use the HCI UI: **Maintenance → HCI Restart** (restarts from browser).
-
-**Non-root users:** Replace `/root/projects` with your user's project directory.
-If running via systemd, use `sudo systemctl restart hermes-control`.
+See [docs/DEPLOY.md](docs/DEPLOY.md) for zero-downtime deploys.
 
 ---
 
-## Changelog
+## Documentation
 
-### v3.5.0 (2026-04-27)
-
-**🧹 Maintenance & Security Hardening:**
-
-- **Dead code removed:** `getProjects()` and `formatBytes()` functions (unused — never called anywhere)
-- **XSS audit complete (S1):** All 15+ `e.message` and `err.message` in `innerHTML` now wrapped with `escapeHtml()` — error handlers across all pages (home, agents, sessions, logs, config, files, terminal, modals, audit log, users)
-- **RBAC precision:** Permissions refined to 20 across 3 roles (admin/viewer/custom) — cleaner than 28 across 12 groups
-- **Session sorting:** Chat sessions sorted by last activity (MAX message timestamp from messages table)
-- **Audit log UX:** Newest-first ordering with Load More at bottom (consistent with other paginated lists)
-
-**🐛 Bug Fixes:**
-
-- **Profile selector sync:** Profile dropdown now correctly syncs after `hermes profile use` (no more stale state after setting default)
-- **Chat agent info panel:** Always visible inside sidebar (no toggle) — shows active agent with bold gold name, all agents list with status dots, ★ default badge
-- **`finalizeWsChat` race guard:** `_finalizeInProgress` flag prevents double-call race condition
-- **`reloadCurrentSessionMessages` race guard:** `_reloadInProgress` flag + all exit paths clear the flag
-- **`showModal` return fix:** Proper if/else with `return` in cancel branch (prevents undefined `.action`)
-
-### v3.4.0 (2026-04-19)
-
-**⚡ Chat Revamp (CLI → Gateway API):**
-- **Gateway API chat:** Full rewrite from CLI subprocess to Gateway API (`/v1/responses`) — real-time SSE streaming, structured events, no more waiting for full response
-- **Tool call cards:** Collapsible cards with JSON viewer for tool results (collapsed by default)
-- **Session resume:** Auto via `X-Hermes-Session-Id` header — conversations persist across page reloads
-- **Stop button:** Cancel running streams mid-response
-- **Multi-profile support:** All profiles (default/soci/cuan/david) work via Gateway API with auto port discovery
-- **CLI fallback:** Automatic fallback to CLI if gateway is down
-- **Session list:** Sorted by last activity, filter by source type (Telegram/Discord/API/CLI/Cron)
-- **Mobile UX:** Auto-hide sidebar on session select, responsive header, opaque topbar
-
-**🔒 Security (CRITICAL + HIGH):**
-- **Command injection fixed:** Skills uninstall/update endpoints use `execHermes()` + strict regex `^[\w.\-]+$` validation
-- **CSRF protection:** 21 admin endpoints now require `requireCsrf` (user mgmt, config, keys, skills, HCI update/rollback/restart, backup, doctor, profiles)
-- **Gateway API key:** Dynamic from `~/.hermes/config.yaml` (removed hardcoded `'hci-gateway-2026'` from source)
-- **Dynamic CORS origins:** `cors_origins` no longer hardcoded — supports `HCI_CORS_ORIGINS` env var, auto-detect from request, or localhost defaults
-- **`escapeHtml()` fix:** Added `"` and `'` escaping to prevent XSS via HTML attributes
-- **Debug CSRF logging removed:** Partial tokens no longer logged to console
-- **18-item security audit report** (SECURITY_AUDIT.md)
-
-**🧹 Maintenance:**
-- ~270 lines dead code removed (unused functions, duplicate endpoints, redundant imports, duplicate CSS)
-- Session cache invalidation after rename and delete operations
-
-**🔌 Open-Source Ready:**
-- CORS origins: dynamic resolution for any deployment (env var → auto-detect → localhost defaults)
-- Gateway API key: reads from config.yaml, env var override supported
-- `.env.example` updated with `GATEWAY_API_KEY` and `HCI_CORS_ORIGINS` documentation
-
-### v3.3.3 (2026-04-19)
-
-**🔒 Security (Critical + High):**
-- **Command injection fix:** Skills uninstall/update endpoints now use `execHermes()` + strict regex validation `^[\w.\-]+$` on skill names (prevents shell metacharacter injection)
-- **CSRF protection:** Added `requireCsrf` to 21 admin endpoints (user mgmt, config, keys, skills, HCI update/rollback/restart, backup, doctor, profile create/delete)
-- **Hardcoded API key removed:** Gateway API key now reads from `~/.hermes/config.yaml` dynamically (was hardcoded `'hci-gateway-2026'` in source)
-- **Dynamic CORS origins:** `cors_origins` no longer hardcoded to specific domains — supports `HCI_CORS_ORIGINS` env var, auto-detect from request origin, or localhost defaults
-- **Session rename:** Switched from `shell()` to `execHermes()` (defense-in-depth)
-
-**🧹 Maintenance:**
-- **Dead code cleanup:** ~270 lines removed across 6 files (unused functions, duplicate endpoints, redundant imports, duplicate CSS)
-- **18-item security audit report** added (SECURITY_AUDIT.md)
-
-**🐛 Bug Fixes:**
-- **Session list sorting:** Fixed sort order — backend now correctly sorts by last activity timestamp
-- **Delete session button:** Fixed operator precedence bug in `await showModal({...})?.action` that prevented delete API call
-- **Session list refresh:** Cache invalidated after rename and delete operations (stale 10s cache)
-- **Gateway session resume:** Gateway process restart fixed stale bytecode issue
-
-**🔌 Open-Source Ready:**
-- CORS origins: dynamic resolution (env var → auto-detect → localhost defaults)
-- Gateway API key: reads from config.yaml, env var override supported
-- `.env.example` updated with `GATEWAY_API_KEY` and `HCI_CORS_ORIGINS` docs
-
-### v3.3.2 (2026-04-17)
-
-**🐛 Bug Fixes:**
-- **HTTP-only deployments:** Disable `upgrade-insecure-requests` CSP directive that broke UI on Tailscale/LAN/dev environments
-- **HOST env var:** Support `HOST` env var for non-localhost server binding (Tailscale IP, LAN, specific interface)
-
-**🤝 Contributors:**
-- @hifiguy — 2 fixes (HOST env + CSP HTTP fix)
-
-### v3.3.0 (2026-04-17)
-
-**💬 Chat Revamp:**
-- Tool call cards: collapsible cards with JSON viewer, collapsed by default
-- Banner suppression: `-Q` flag passed to hermes for clean output
-- Session sidebar: model tag, session list, resume/new chat buttons
-- Auto-detect session ID format: new (`session_id: YYYYMMDD_HHMMSS_HEX`) and legacy (`Session: YYYYMMDD_HHMMSS_HEX`)
-- `--continue ""` (empty) creates fresh session; bare `--continue` resumes last session
-
-**👥 User Management v2 (RBAC):**
-- 20 permissions across 3 roles: Admin (full), Viewer (read-only), Custom (your choice)
-- Built-in roles: `admin` (full access), `viewer` (read-only), custom role
-- Create/edit user modal: role presets (Admin/Viewer), grouped permission checklist, reset password button
-- Permission gating on 9 previously-unprotected endpoints
-
-**🔒 Security:**
-- Full security audit (docs/SECURITY_AUDIT.md) — score 7.0/10
-- XSS fix: `loadHomeCards()` now escapes all dynamic values with `escapeHtml()`
-- Rate limiter: terminal exec limited to 30 commands/minute per IP (429 on exceeded)
-- Token cleanup: proper `setInterval()` every 15 minutes (was only on token creation)
-- Admin-only gate: `GET /api/plugins` now requires admin role
-- Full activity audit log: Maintenance → Audit panel
-
-**📦 Skills:**
-- Check updates: handles "unavailable" source status gracefully (info message, not error)
-- Uninstall: uses stdin pipe (`echo y |`) instead of unsupported `--yes` flag
-
-**🐛 Bug Fixes:**
-- Notification dismiss: backend handles both `/api/notifications/:id/dismiss` and `/api/notifications/dismiss`
-- Sidebar: responsive CSS, `flex-shrink:0`, mobile breakpoints at 480px
-- Agent dropdown: follows dark/light theme correctly
-- Favicon 404 loop: moved to `public/` to prevent Vite hash mismatch
-- HCI Info panel: version, GitHub link, Twitter @bayendor link in Maintenance
-
-**📝 Docs:**
-- Security audit report (12 categories)
-- Removed outdated script references (install.sh, reset-password.sh)
-- Screenshots: 13 dark mode, 6 light mode
-
-### v3.2.0 (2026-04-14)
-
-**⚡ Performance:**
-- Insights speed: 60s+ timeout → 0.65s via IPv4 adapter on model_metadata.py
-- Timeouts reduced: 10s → 5s (model metadata), 5s → 3s (llama.cpp props)
-
-**🔒 Security:**
-- WebSocket origin: exact match (was substring check)
-- Body limit: 10MB → 1MB global, 10MB only on avatar upload
-- Temp files: `crypto.randomUUID()` (no predictable paths)
-- Skills install/uninstall: `execHermes()` instead of shell interpolation
-- Username validation: 2-32 chars, alphanumeric/_.- only
-
-**✨ Features:**
-- Log tabs: Agent, Error, and Gateway logs now working
-- Non-root user support: dynamic HCI identity, HOME-aware paths
-- Gateway service: auto-detect `hermes-gateway-<profile>` for non-root
-
-**🐛 Fixes:**
-- Terminal flow: transcript handling after sendCommand
-- XSS: 15+ escaped user-facing error messages
-- Auth panel: data loaded async, doesn't block page load
-- CPR stripping: removed ANSI escape from terminal
-
-### v3.1.0 (2026-04-12)
-
-- Skills Hub + Honcho panel + Gateway connections
-- HTTPS support
-- Maintenance UI: Backup & Import, HCI Restart buttons
+| Doc | Content |
+|-----|---------|
+| [INSTALL.md](docs/INSTALL.md) | Full setup — nginx, systemd, Cloudflare |
+| [CONFIG.md](docs/CONFIG.md) | All environment variables |
+| [API.md](docs/API.md) | REST API reference |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions, data flow |
+| [SECURITY.md](docs/SECURITY.md) | CSP, CSRF, auth, hardening |
+| [DEPLOY.md](docs/DEPLOY.md) | Production deployment patterns |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and fixes |
+| [CHANGELOG.md](docs/CHANGELOG.md) | Version history |
 
 ---
 
-## License
-
-MIT
-
-## Credits
-
-Built for the [Hermes Agent](https://github.com/NousResearch/hermes-agent) ecosystem.
-
-[@bayendor](https://x.com/bayendor) — GitHub: [xaspx](https://github.com/xaspx)
+Built for the [Hermes Agent](https://github.com/NousResearch/hermes-agent) ecosystem.  
+[@bayendor](https://x.com/bayendor) · [GitHub](https://github.com/xaspx/hermes-control-interface)

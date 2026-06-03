@@ -126,6 +126,9 @@ function execHermes(args, timeout = 30000, stdin = null) {
   });
 }
 
+// ── Direct data access (no hermes CLI subprocess) ──
+const { getHermesVersion, getAgentCount, getSessionCount } = require('./lib/hermes');
+
 // ── Load HCI config (hci.config.yaml + env overrides) ──
 const cfg = getConfig();
 
@@ -180,6 +183,7 @@ if (!CONTROL_PASSWORD || !CONTROL_SECRET) {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 
 // Security headers — safe config (no HSTS, CSP allows Google Fonts)
 app.use(helmet({
@@ -204,14 +208,36 @@ app.use(express.static(path.join(__dirname, 'dist'), {
   maxAge: '365d',
   immutable: true,
   setHeaders: (res, filePath) => {
-    // HTML files should NEVER be cached (they reference hashed assets)
-    if (filePath.endsWith('.html')) {
+    // HTML, service worker, manifest, and i18n should NEVER be cached
+    if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('manifest.json') || filePath.includes('/i18n/')) {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
     }
   },
 }));
+
+// ── Rate Limiting ──────────────────────────────────────────────────────────
+// Global: 150 req/min per IP across all endpoints
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 150,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests — slow down' },
+  skip: (req) => req.path === '/api/health' || req.path === '/ws',
+});
+
+// Chat: 30 req/min per IP (heavy — subprocess per call)
+const chatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Chat rate limit — please wait' },
+});
+
+app.use(globalLimiter);
 
 // API responses should NEVER be cached
 app.use('/api', (req, res, next) => {
@@ -515,7 +541,7 @@ app.post('/api/gateway/responses', requireAuth, requirePerm('chat.use'), async (
   }
 });
 
-app.post('/api/chat/send', requireAuth, requirePerm('chat.use'), async (req, res) => {
+app.post('/api/chat/send', requireAuth, requirePerm('chat.use'), chatLimiter, async (req, res) => {
   const { message, profile, sessionId, model } = req.body || {};
   if (!message || typeof message !== 'string') return res.status(400).json({ error: 'message required' });
 
@@ -1463,7 +1489,8 @@ function loadSessionsFromDb(stateDbPath, limit = 250) {
 async function getAllSessions(profile) {
   const now = Date.now();
   const cacheKey = profile || 'all';
-  if (hermesAllSessionsCache.data.length && now - hermesAllSessionsCache.at < 10_000 && hermesAllSessionsCache.key === cacheKey) {
+  // Cache: valid for 10s regardless of result (even empty array)
+  if (hermesAllSessionsCache.at > 0 && now - hermesAllSessionsCache.at < 10_000 && hermesAllSessionsCache.key === cacheKey) {
     return hermesAllSessionsCache.data;
   }
   const cmd = profile ? `hermes -p ${profile} sessions list --limit 250` : 'hermes sessions list --limit 250';
@@ -1790,7 +1817,7 @@ async function buildDashboardState(authed = false) {
   };
 }
 
-app.get('/api/session', (req, res) => {
+app.get('/api/session', requireAuth, (req, res) => {
   const authed = isAuthed(req);
   const response = { authenticated: authed, passwordRequired: true, identity: HCI_IDENTITY };
   if (authed) {
@@ -1812,7 +1839,7 @@ const {
 } = require('./auth');
 
 // Periodic cleanup of expired auth tokens (every 15 minutes)
-setInterval(() => {
+const tokenCleanupInterval = setInterval(() => {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   for (const [k] of tokenToUser) {
     const [t] = k.split('.');
@@ -2083,12 +2110,12 @@ app.get('/api/system/health', requireAuth, async (req, res) => {
     const load1 = os.loadavg()[0] || 0;
     const cpuPct = Math.min(100, Math.max(0, Math.round((load1 / cpuCores) * 100)));
 
-    const [disk, version, agents, sessions] = await Promise.all([
+    const [disk] = await Promise.all([
       shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
-      shell("hermes version 2>&1 | head -1"),
-      shell("hermes profile list 2>&1 | wc -l"),
-      shell("hermes sessions list --limit 1000 2>&1 | wc -l"),
     ]);
+    const version = getHermesVersion();
+    const agents = getAgentCount();
+    const sessions = getSessionCount();
     // Format uptime from process.uptime()
     const upSec = process.uptime();
     const upDays = Math.floor(upSec / 86400);
@@ -2104,8 +2131,8 @@ app.get('/api/system/health', requireAuth, async (req, res) => {
       hermes_version: version.trim() || 'N/A',
       hci_version: require('./package.json').version,
       node_version: process.version,
-      agents: Math.max(0, parseInt(agents.trim()) - 2) || 0, // subtract header lines
-      sessions: Math.max(0, parseInt(sessions.trim()) - 2) || 0,
+      agents,
+      sessions,
     });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -2123,13 +2150,13 @@ app.get('/api/monitoring', requireAuth, async (req, res) => {
     const load1 = loadAvg[0] || 0;
     const cpuPct = Math.min(100, Math.max(0, Math.round((load1 / cpuCores) * 100)));
 
-    const [disk, netio, processes, uptime, version] = await Promise.all([
+    const [disk, netio, processes, uptime] = await Promise.all([
       shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
       shell("cat /proc/net/dev | awk 'NR==3 {print $1, $9}'"),
       shell("ps aux --no-headers | wc -l"),
       shell("uptime | awk -F'up ' '{split($2,a,\" user\");print a[1]\", \"$3}'"),
-      shell("hermes version 2>&1 | head -1"),
     ]);
+    const version = getHermesVersion();
 
     // Parse network interface (skip loopback)
     const netParts = (netio || 'lo 0').trim().split(/\s+/);
@@ -2474,7 +2501,7 @@ app.get('/api/gateway/:profile/connections', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/gateway/:profile/:action', requireCsrf, async (req, res) => {
+app.post('/api/gateway/:profile/:action', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
   const profile = sanitizeProfileName(req.params.profile);
   const action = sanitizeGatewayAction(req.params.action);
 
@@ -2857,7 +2884,7 @@ app.get('/api/files/list', requireAuth, (req, res) => {
 });
 
 // Ensure terminal session exists
-app.post('/api/terminal/ensure', requireAuth, (req, res) => {
+app.post('/api/terminal/ensure', requireAuth, requireCsrf, (req, res) => {
   try {
     const session = ensureTerminalSession();
     res.json({ ok: true, ready: session.ready, cwd: session.cwd });
@@ -2978,7 +3005,7 @@ app.get('/api/layout', requireAuth, (req, res) => {
   res.json({ ok: true, layout: readLayoutStore() });
 });
 
-app.post('/api/layout', requireCsrf, (req, res) => {
+app.post('/api/layout', requireAuth, requireCsrf, (req, res) => {
   try {
     const panels = Array.isArray(req.body?.panels) ? req.body.panels : [];
     const normalized = panels
@@ -3046,12 +3073,606 @@ app.put('/api/office/departments/:id/members', requireRole('admin'), requireCsrf
   res.json({ ok: true });
 });
 
+// ── Office v2: Agent States + Event Timeline ───────────────────────────────
+
+// Fast agent alive check — uses pre-discovered gatewayPorts from server memory
+function checkAgentAlive(name) {
+  // gatewayPorts is set at server startup by discoverGatewayPorts()
+  // e.g. { default: 8642, david: 8645, cuan: 8650, soci: 8650 }
+  return typeof gatewayPorts === 'object' && gatewayPorts !== null && name in gatewayPorts;
+}
+// Parse agent state from `hermes -p <name> status` output (legacy — kept for reference)
+function parseOfficeAgentState(stdout, profileName) {
+  const result = {
+    name: profileName,
+    state: 'stopped',
+    model: null,
+    provider: null,
+    lastAction: null,
+  };
+
+  try {
+    const grab = (key) => {
+      const re = new RegExp(key + ':\\s*(.+)', 'm');
+      const m = stdout.match(re);
+      return m ? m[1].trim() : null;
+    };
+
+    result.model = grab('Model') || 'unknown';
+    result.provider = grab('Provider') || 'unknown';
+
+    // Detect granular state from status text
+    const lower = stdout.toLowerCase();
+
+    // Check for blocked/waiting first (highest priority)
+    if (lower.includes('waiting for user') || lower.includes('clarify') || lower.includes('blocked')) {
+      result.state = 'blocked';
+    // Check for thinking state
+    } else if (lower.includes('thinking') || lower.includes('reasoning')) {
+      result.state = 'thinking';
+    // Check for active tool execution (NOT "Terminal Backend" status line)
+    } else if (/executing|tool_call/.test(lower)) {
+      result.state = 'coding';
+    // Check for idle
+    } else if (lower.includes('idle')) {
+      result.state = 'idle';
+    // Default: running (present in status output "✓ running")
+    } else {
+      result.state = 'running';
+    }
+
+    const lastMatch = stdout.match(/Last (?:action|activity):\s*(.+)$/m);
+    if (lastMatch) result.lastAction = lastMatch[1].trim();
+
+  } catch (e) {
+    // graceful fallback — return 'unknown' state
+  }
+
+  return result;
+}
+
+// Agent states for office visualization (per-profile read from CLI)
+app.get('/api/office/agent-states', requireAuth, async (req, res) => {
+  try {
+    const deptData = readOfficeDepartments();
+    const departments = deptData.departments || [];
+    const agents = [];
+    const assignedNames = new Set();
+
+    // Collect all agent names to query — departments + unassigned profiles
+    const namesToQuery = [];
+    const deptLookup = {}; // name → dept info
+
+    for (const dept of departments) {
+      const members = Array.isArray(dept.members) ? dept.members : [];
+      for (const name of members) {
+        if (!name) continue;
+        assignedNames.add(name);
+        deptLookup[name] = { department: dept.name, deptColor: dept.color, deptId: dept.id };
+        namesToQuery.push(name);
+      }
+    }
+
+    // Unassigned agents
+    try {
+      const profilesDir = path.join(CONTROL_HOME, 'profiles');
+      if (fs.existsSync(profilesDir)) {
+        const dirs = fs.readdirSync(profilesDir).filter(d => {
+          const full = path.join(profilesDir, d);
+          return !d.startsWith('.') && fs.statSync(full).isDirectory()
+            && fs.existsSync(path.join(full, 'config.yaml'));
+        });
+        for (const name of dirs) {
+          if (assignedNames.has(name)) continue;
+          deptLookup[name] = { department: null, deptColor: '#666', deptId: null, unassigned: true };
+          namesToQuery.push(name);
+        }
+      }
+    } catch { /* profiles dir may not exist */ }
+
+    // FAST hybrid: config.yaml + kanban.db (no subprocess spawn)
+    // ~100ms vs ~3000ms for `hermes status`
+    const kanbanDB = openKanbanDB('main');
+    
+    for (const name of namesToQuery) {
+      const { department, deptColor, deptId, unassigned } = deptLookup[name];
+      const agent = {
+        name, department, deptColor, deptId, unassigned: !!unassigned,
+        state: 'stopped', model: 'unknown', provider: 'unknown', lastAction: null,
+        activeTasks: 0, totalTasks: 0,
+      };
+
+      try {
+        // 1. Read config.yaml for model/provider (instant file read)
+        const configPath = path.join(CONTROL_HOME, 'profiles', sanitizeProfileName(name), 'config.yaml');
+        // Default profile uses root hermes config
+        const rootConfigPath = path.join(CONTROL_HOME, 'config.yaml');
+        const readPath = (name === 'default') ? rootConfigPath : configPath;
+        if (fs.existsSync(readPath)) {
+          const cfg = yaml.load(fs.readFileSync(readPath, 'utf8'));
+          if (cfg && cfg.model) {
+            agent.model = cfg.model.default || 'unknown';
+            agent.provider = cfg.model.provider || 'unknown';
+          }
+        }
+
+        // 2. Query kanban.db for task counts (instant synchronous SQL — better-sqlite3)
+        if (kanbanDB) {
+          try {
+            const activeRow = kanbanDB.prepare(
+              "SELECT count(*) as cnt FROM tasks WHERE assignee=? AND status IN ('running','in_progress')"
+            ).get(name);
+            const blockedRow = kanbanDB.prepare(
+              "SELECT count(*) as cnt FROM tasks WHERE assignee=? AND status='blocked'"
+            ).get(name);
+            const totalRow = kanbanDB.prepare(
+              "SELECT count(*) as cnt FROM tasks WHERE assignee=?"
+            ).get(name);
+            agent.activeTasks = activeRow ? activeRow.cnt : 0;
+            agent.blockedTasks = blockedRow ? blockedRow.cnt : 0;
+            agent.totalTasks = totalRow ? totalRow.cnt : 0;
+
+            // 3. Last action from kanban task_events
+            const lastEvent = kanbanDB.prepare(
+              "SELECT kind, created_at FROM task_events WHERE task_id IN (SELECT id FROM tasks WHERE assignee=?) ORDER BY created_at DESC LIMIT 1"
+            ).get(name);
+            if (lastEvent) {
+              agent.lastAction = lastEvent.kind;
+            }
+          } catch (sqe) { /* SQL error — non-critical */ }
+        }
+
+        // 4. Check if agent gateway is alive (process or port check)
+        const gatewayAlive = checkAgentAlive(name);
+        
+        // 5. Determine state
+        if (!gatewayAlive) {
+          agent.state = 'stopped';
+        } else if (agent.blockedTasks > 0) {
+          agent.state = 'blocked';
+        } else if (agent.activeTasks > 0) {
+          agent.state = 'coding';
+        } else {
+          agent.state = 'idle';
+        }
+      } catch (e) {
+        // graceful fallback
+      }
+
+      agents.push(agent);
+    }
+
+    res.json({ ok: true, agents, timestamp: Date.now() });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// Sanitize action text — strip file paths and potential tokens
+function sanitizeAction(text) {
+  return String(text || '')
+    .replace(/\/[^\s]*\/\S*/g, '[...]')
+    .replace(/[A-Za-z0-9_-]{32,}/g, '***');
+}
+
+// Collect recent events from gateway log
+function collectOfficeEvents() {
+  const events = [];
+  const MAX = 50;
+
+  try {
+    const logPath = path.join(CONTROL_HOME, 'hermes-agent', 'logs', 'gateway.log');
+    const logPaths = [logPath];
+    // Also try standard log location
+    const altLog = '/root/.hermes/hermes-agent/gateway.log';
+    if (altLog !== logPath && fs.existsSync(altLog)) logPaths.push(altLog);
+
+    for (const lp of logPaths) {
+      if (!fs.existsSync(lp)) continue;
+      const out = require('child_process').execSync(
+        `tail -n 300 "${lp}" 2>/dev/null || true`, { encoding: 'utf8', timeout: 3000 }
+      );
+      const lines = String(out || '').split('\n').reverse();
+
+      for (const line of lines) {
+        if (events.length >= MAX) break;
+
+        const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+        if (!tsMatch) continue;
+        const timestamp = tsMatch[1];
+
+        let agent = null, action = null, emoji = null;
+
+        // Delegation
+        const d = line.match(/\[(.*?)\].*delegat(e|ing)\s*(?:to\s+)?(\S+)/i);
+        if (d) { agent = d[1]; action = `delegated to ${d[3]}`; emoji = '🔄'; }
+
+        // Tool calls
+        if (!action) {
+          const t = line.match(/\[(.*?)\].*(search_files|web_search|terminal|read_file|write_file|delegate_task|execute_code|mcp_)/i);
+          if (t) {
+            agent = t[1];
+            const m = { search_files: '🔍', web_search: '🔍', terminal: '🖥️', read_file: '📁', write_file: '📁', delegate_task: '🔄', execute_code: '⚡' };
+            emoji = m[t[2]] || '🔧';
+            action = t[2].replace(/_/g, ' ');
+          }
+        }
+
+        // Cron
+        if (!action) {
+          const c = line.match(/cron.*?["']([^"']+)["'].*?(?:complet|finish)/i);
+          if (c) { agent = 'cron'; action = `"${c[1]}" done`; emoji = '⏰'; }
+        }
+
+        // Webhook
+        if (!action) {
+          const w = line.match(/webhook.*?(?:received|trigger).*?(?:from\s+)?(\S+)/i);
+          if (w) { agent = 'webhook'; action = w[1]; emoji = '📨'; }
+        }
+
+        // Thinking
+        if (!action) {
+          const th = line.match(/\[(.*?)\].*(thinking|reasoning)/i);
+          if (th) { agent = th[1]; action = 'thinking...'; emoji = '💭'; }
+        }
+
+        if (agent && action) {
+          events.push({ timestamp, agent: agent.slice(0, 32), action: sanitizeAction(action), emoji });
+        }
+      }
+      if (events.length >= MAX) break;
+    }
+  } catch { /* log parsing is best-effort */ }
+
+  return events.slice(0, MAX);
+}
+
+// Office event timeline — admin only (may contain tool names, agent internals)
+app.get('/api/office/events', requireAuth, (req, res) => {
+  const user = getCurrentUser(req);
+  if (!user || user.role !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Forbidden: admin only' });
+  }
+
+  try {
+    let events = collectOfficeEvents();
+
+    // Fallback: if gateway logs are empty, read from kanban.db task_events
+    if (!events.length) {
+      try {
+        const db = openKanbanDB('main');
+        if (db) {
+          const rows = db.prepare(`
+            SELECT te.kind, te.payload, te.created_at, t.title, t.assignee
+            FROM task_events te
+            LEFT JOIN tasks t ON t.id = te.task_id
+            ORDER BY te.created_at DESC
+            LIMIT 50
+          `).all();
+          db.close();
+
+          events = rows.map(r => ({
+            timestamp: new Date(r.created_at * 1000).toISOString().replace('T', ' ').slice(0, 19),
+            agent: r.assignee || 'system',
+            action: `${r.kind}: ${(r.title || 'task').slice(0, 40)}`,
+            emoji: r.kind === 'completed' ? '✅' : r.kind === 'heartbeat' ? '💓' : r.kind === 'blocked' ? '⚠️' : '📋',
+          }));
+        }
+      } catch { /* best-effort */ }
+    }
+
+    res.json({ ok: true, events, timestamp: Date.now() });
+  } catch (e) {
+    res.json({ ok: false, events: [], error: e.message });
+  }
+});
+
+// ── Office v4: Kanban Board Data ────────────────────────────────────────
+
+// Open kanban.db read-only (shared across requests)
+function openKanbanDB(board) {
+  const safe = (board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+  const dbPath = path.join(CONTROL_HOME, 'kanban', 'boards', safe, 'kanban.db');
+  if (!fs.existsSync(dbPath)) return null;
+  return new Database(dbPath, { readonly: true });
+}
+
+function openKanbanDBWritable(board) {
+  const safe = (board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+  const dbPath = path.join(CONTROL_HOME, 'kanban', 'boards', safe, 'kanban.db');
+  if (!fs.existsSync(dbPath)) return null;
+  return new Database(dbPath); // writable
+}
+
+app.get('/api/office/kanban', requireAuth, (req, res) => {
+  try {
+    const board = String(req.query.board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+    const db = openKanbanDB(board);
+    if (!db) return res.json({ ok: true, board, tasks: [], links: [], columns: [] });
+
+    // 1. Query all non-archived tasks
+    const tasks = db.prepare(`
+      SELECT id, title, body, assignee, status, priority, created_by,
+             created_at, started_at, completed_at
+      FROM tasks
+      WHERE status != 'archived'
+      ORDER BY priority ASC, created_at DESC
+      LIMIT 200
+    `).all();
+
+    // 2. Query dependency links
+    const links = db.prepare(`
+      SELECT parent_id, child_id FROM task_links
+      WHERE parent_id IN (SELECT id FROM tasks WHERE status != 'archived')
+        AND child_id IN (SELECT id FROM tasks WHERE status != 'archived')
+    `).all();
+
+    // 3. Build columns — one per assignee with tasks
+    const columnMap = {};
+    for (const t of tasks) {
+      const key = t.assignee || 'unassigned';
+      if (!columnMap[key]) columnMap[key] = { assignee: key, tasks: [] };
+      columnMap[key].tasks.push(t);
+    }
+    const columns = Object.values(columnMap);
+
+    // 4. Stats
+    const statusCounts = {};
+    for (const t of tasks) {
+      statusCounts[t.status] = (statusCounts[t.status] || 0) + 1;
+    }
+
+    db.close();
+
+    res.json({
+      ok: true,
+      board,
+      tasks,
+      links,
+      columns,
+      stats: statusCounts,
+      total: tasks.length,
+      timestamp: Date.now(),
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// List available boards
+app.get('/api/office/kanban/boards', requireAuth, (req, res) => {
+  try {
+    const boardsDir = path.join(CONTROL_HOME, 'kanban', 'boards');
+    const boards = [];
+    if (fs.existsSync(boardsDir)) {
+      for (const d of fs.readdirSync(boardsDir)) {
+        const dbPath = path.join(boardsDir, d, 'kanban.db');
+        if (fs.existsSync(dbPath)) boards.push(d);
+      }
+    }
+    res.json({ ok: true, boards });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// Task detail — full info including run history, events, comments, attachments
+app.get('/api/office/kanban/:taskId', requireAuth, (req, res) => {
+  try {
+    const taskId = String(req.params.taskId).replace(/[^a-zA-Z0-9_-]/g, '');
+    const board = String(req.query.board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+    const db = openKanbanDB(board);
+    if (!db) return res.json({ ok: false, error: 'board not found' });
+
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+    if (!task) { db.close(); return res.json({ ok: false, error: 'task not found' }); }
+
+    const runs = db.prepare('SELECT * FROM task_runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 20').all(taskId);
+    const events = db.prepare('SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at DESC LIMIT 50').all(taskId);
+    const comments = db.prepare('SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at DESC LIMIT 20').all(taskId);
+    const attachments = db.prepare('SELECT id, task_id, filename, content_type, size, uploaded_by, created_at FROM task_attachments WHERE task_id = ? ORDER BY created_at DESC LIMIT 20').all(taskId);
+    const links = db.prepare('SELECT * FROM task_links WHERE parent_id = ? OR child_id = ?').all(taskId, taskId);
+
+    db.close();
+
+    res.json({
+      ok: true,
+      task,
+      runs: runs.map(r => ({ ...r, metadata: r.metadata ? JSON.parse(r.metadata) : null })),
+      events,
+      comments,
+      attachments,
+      links,
+      timestamp: Date.now(),
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// ── Read workspace file contents ────────────────────────────────────────────
+app.get('/api/office/kanban/:taskId/workspace-file', requireAuth, (req, res) => {
+  try {
+    const taskId = String(req.params.taskId).replace(/[^a-zA-Z0-9_-]/g, '');
+    const board = String(req.query.board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+    const filePath = req.query.path || '';
+
+    // Security: only allow reading within the task's workspace
+    const workspaceDir = path.join(CONTROL_HOME, 'kanban', 'boards', board, 'workspaces', taskId);
+    const resolvedPath = path.resolve(workspaceDir, filePath);
+
+    // Verify resolved path is within workspace directory
+    if (!resolvedPath.startsWith(path.resolve(workspaceDir))) {
+      return res.json({ ok: false, error: 'path traversal denied' });
+    }
+
+    if (!fs.existsSync(resolvedPath)) {
+      return res.json({ ok: false, error: 'file not found' });
+    }
+
+    const stat = fs.statSync(resolvedPath);
+    if (stat.isDirectory()) {
+      // List directory contents
+      const files = fs.readdirSync(resolvedPath).map(f => {
+        const fp = path.join(resolvedPath, f);
+        const s = fs.statSync(fp);
+        return { name: f, size: s.size, isDir: s.isDirectory(), mtime: s.mtimeMs };
+      });
+      return res.json({ ok: true, files, isDir: true });
+    }
+
+    // Limit file size to 500KB
+    if (stat.size > 512000) {
+      return res.json({ ok: false, error: 'file too large (>500KB)', size: stat.size });
+    }
+
+    const content = fs.readFileSync(resolvedPath, 'utf8');
+    const ext = path.extname(filePath).toLowerCase();
+    const isCode = ['.py', '.js', '.ts', '.json', '.sh', '.yaml', '.yml', '.toml', '.rs', '.go',
+      '.md', '.txt', '.log', '.csv', '.html', '.css', '.sql', '.env', '.cfg'].includes(ext);
+
+    res.json({
+      ok: true,
+      filename: path.basename(filePath),
+      size: stat.size,
+      mtime: stat.mtimeMs,
+      language: isCode ? ext.replace('.', '') : 'text',
+      content,
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// ── Quick actions on kanban tasks (triage from Office) ──
+app.post('/api/office/kanban/:taskId/action', requireAuth, requireCsrf, (req, res) => {
+  try {
+    const taskId = String(req.params.taskId).replace(/[^a-zA-Z0-9_-]/g, '');
+    const board = String(req.query.board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+    const { action, assignee } = req.body || {};
+    const now = Math.floor(Date.now() / 1000);
+
+    const db = openKanbanDBWritable(board);
+    if (!db) return res.json({ ok: false, error: 'board not found' });
+
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+    if (!task) { db.close(); return res.json({ ok: false, error: 'task not found' }); }
+
+    const validActions = {
+      unblock:  () => db.prepare('UPDATE tasks SET status=?, completed_at=NULL WHERE id=?').run('ready', taskId),
+      done:     () => db.prepare('UPDATE tasks SET status=?, completed_at=? WHERE id=?').run('done', now, taskId),
+      reopen:   () => db.prepare('UPDATE tasks SET status=?, completed_at=NULL, started_at=NULL WHERE id=?').run('todo', taskId),
+      start:    () => db.prepare('UPDATE tasks SET status=?, started_at=? WHERE id=?').run('running', now, taskId),
+      reassign: () => {
+        const newAssignee = String(assignee || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+        if (!newAssignee) return { error: 'assignee is required for reassign' };
+        return db.prepare('UPDATE tasks SET assignee=? WHERE id=?').run(newAssignee, taskId);
+      },
+    };
+
+    if (!validActions[action]) { db.close(); return res.json({ ok: false, error: `unknown action: ${action}. valid: ${Object.keys(validActions).join(', ')}` }); }
+
+    const result = validActions[action]();
+    db.close();
+
+    if (result?.error) return res.json({ ok: false, error: result.error });
+
+    res.json({ ok: true, action, taskId, board });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// ── Office Board Summary ──────────────────────────────────────────────────
+app.get('/api/office/summary', requireAuth, (req, res) => {
+  try {
+    const board = String(req.query.board || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+    const db = openKanbanDB(board);
+    if (!db) return res.json({ ok: false, error: 'board not found' });
+
+    const now = Math.floor(Date.now() / 1000);
+    const tasks = db.prepare('SELECT id, title, assignee, status, priority, created_at, started_at FROM tasks WHERE status != ? ORDER BY priority ASC, created_at DESC').all('archived');
+    const links = db.prepare('SELECT parent_id, child_id FROM task_links').all();
+    db.close();
+
+    const taskMap = {};
+    tasks.forEach(t => { taskMap[t.id] = t; });
+
+    // Status counts
+    const counts = { triage:0, todo:0, scheduled:0, ready:0, running:0, blocked:0, review:0, done:0 };
+    tasks.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
+
+    // Agent workload
+    const agents = {};
+    tasks.forEach(t => {
+      const a = t.assignee || 'unassigned';
+      if (!agents[a]) agents[a] = { running:0, blocked:0, total:0 };
+      agents[a].total++;
+      if (t.status === 'running') agents[a].running++;
+      if (t.status === 'blocked') agents[a].blocked++;
+    });
+
+    // Critical alerts
+    const alerts = [];
+
+    // Blocked tasks
+    const blocked = tasks.filter(t => t.status === 'blocked');
+    if (blocked.length) {
+      alerts.push({ level:'warning', title:`${blocked.length} task blocked`, items: blocked.map(t => ({ id:t.id, title:t.title, assignee:t.assignee })) });
+    }
+
+    // Stale running (no heartbeat in 10+ min — checked via started_at)
+    const staleRunning = tasks.filter(t => t.status === 'running' && t.started_at && (now - t.started_at) > 600);
+    if (staleRunning.length) {
+      alerts.push({ level:'warning', title:`${staleRunning.length} task may be stuck (running >10min, no heartbeat)`, items: staleRunning.map(t => ({ id:t.id, title:t.title, assignee:t.assignee, minutes: Math.floor((now - t.started_at)/60) })) });
+    }
+
+    // Review pending
+    const review = tasks.filter(t => t.status === 'review');
+    if (review.length) {
+      alerts.push({ level:'info', title:`${review.length} task waiting approval`, items: review.map(t => ({ id:t.id, title:t.title, assignee:t.assignee })) });
+    }
+
+    // Dependency issues: tasks waiting on blocked/running parents
+    const waitingList = [];
+    links.forEach(l => {
+      const child = taskMap[l.child_id];
+      const parent = taskMap[l.parent_id];
+      if (!child || !parent) return;
+      if (parent.status !== 'done' && child.status !== 'done') {
+        waitingList.push({ childId:child.id, childTitle:child.title, childStatus:child.status, parentId:parent.id, parentTitle:parent.title, parentStatus:parent.status });
+      }
+    });
+    if (waitingList.length) {
+      alerts.push({ level:'info', title:`${waitingList.length} dependency waiting`, items: waitingList.map(w => ({ id:w.childId, title:`${w.childTitle} ⏳ ${w.parentTitle} (${w.parentStatus})` })) });
+    }
+
+    // Recommendations
+    const recs = [];
+    if (blocked.length) recs.push('🔓 Review blocked tasks — unblock if resolved');
+    if (staleRunning.length) recs.push('🔍 Check stale running tasks — kill & respawn if stuck');
+    if (review.length) recs.push('✅ Approve review tasks to move them to Done');
+    if (counts.triage > 3) recs.push('📋 Triage backlog piling up — too much incoming');
+    if (counts.todo > 5) recs.push('📋 Todo queue growing — add more workers or prioritize');
+
+    res.json({
+      ok: true, board, timestamp: now,
+      overview: { total:tasks.length, ...counts },
+      agents: Object.entries(agents).map(([name,data]) => ({ name, ...data })),
+      alerts,
+      recommendations: recs.length ? recs : ['✅ Board looks healthy — no actions needed'],
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 app.get('/api/avatar', requireAuth, (req, res) => {
   res.json({ ok: true, url: '/api/avatar/image', custom: !!readAvatarOverride() });
 });
 
 // Debug: force agent sprite state for testing
-app.post('/api/agent/state', requireCsrf, (req, res) => {
+app.post('/api/agent/state', requireAuth, requireRole('admin'), requireCsrf, (req, res) => {
   const target = String(req.body?.state || '').toLowerCase();
   const valid = ['idle', 'thinking', 'coding', 'executing', 'error'];
   if (!valid.includes(target)) return res.status(400).json({ error: `valid states: ${valid.join(', ')}` });
@@ -3066,7 +3687,7 @@ app.post('/api/agent/state', requireCsrf, (req, res) => {
   return res.json({ ok: true, state: target });
 });
 
-app.post('/api/avatar', requireCsrf, express.json({ limit: '10mb' }), (req, res) => {
+app.post('/api/avatar', requireAuth, requireCsrf, express.json({ limit: '10mb' }), (req, res) => {
   const dataUrl = String(req.body?.dataUrl || '').trim();
   if (!dataUrl) return res.status(400).json({ error: 'no data' });
   // Accept any image/* data URL with base64 encoding
@@ -3088,7 +3709,7 @@ app.post('/api/avatar', requireCsrf, express.json({ limit: '10mb' }), (req, res)
   return res.json({ ok: true, url: '/api/avatar/image', custom: true });
 });
 
-app.delete('/api/avatar', requireCsrf, (req, res) => {
+app.delete('/api/avatar', requireAuth, requireCsrf, (req, res) => {
   clearAvatarOverride();
   log('avatar.reset', 'avatar reverted to default photo');
   broadcast();
@@ -4112,7 +4733,7 @@ app.post('/api/hci-restart', requireRole('admin'), requireCsrf, (req, res) => {
 });
 
 // Session rename
-app.post('/api/sessions/:id/rename', requireCsrf, async (req, res) => {
+app.post('/api/sessions/:id/rename', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
   try {
     const sessionId = sanitizeSessionId(req.params.id);
     if (!sessionId) return res.status(400).json({ ok: false, error: 'invalid session id' });
@@ -4203,7 +4824,7 @@ app.get('/api/sessions/:id/messages', requireAuth, (req, res) => {
 });
 
 // Session delete
-app.delete('/api/sessions/:id', requireCsrf, async (req, res) => {
+app.delete('/api/sessions/:id', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
   try {
     const sessionId = sanitizeSessionId(req.params.id);
     if (!sessionId) return res.status(400).json({ ok: false, error: 'invalid session id' });
@@ -4718,7 +5339,7 @@ app.get('/api/hermes-cron/:profile', requireAuth, async (req, res) => {
 });
 
 // Create job
-app.post('/api/hermes-cron/:profile/create', requireCsrf, async (req, res) => {
+app.post('/api/hermes-cron/:profile/create', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
   try {
     const profile = sanitizeProfileName(req.params.profile);
     if (!profile) return res.status(400).json({ ok: false, error: 'invalid profile name' });
@@ -4742,7 +5363,7 @@ app.post('/api/hermes-cron/:profile/create', requireCsrf, async (req, res) => {
 });
 
 // Pause/Resume/Run/Remove job
-app.post('/api/hermes-cron/:profile/:jobId/:action', requireCsrf, async (req, res) => {
+app.post('/api/hermes-cron/:profile/:jobId/:action', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
   try {
     const profile = sanitizeProfileName(req.params.profile);
     const jobId = req.params.jobId;
@@ -4759,7 +5380,7 @@ app.post('/api/hermes-cron/:profile/:jobId/:action', requireCsrf, async (req, re
 });
 
 // Cron edit endpoint
-app.put('/api/hermes-cron/:profile/:jobId', requireCsrf, async (req, res) => {
+app.put('/api/hermes-cron/:profile/:jobId', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
   try {
     const profile = sanitizeProfileName(req.params.profile);
     const jobId = req.params.jobId;
@@ -4812,6 +5433,13 @@ const server = (() => {
   });
   return server;
 })();
+
+// Track all active HTTP connections for graceful shutdown
+const activeConnections = new Set();
+server.on('connection', (conn) => {
+  activeConnections.add(conn);
+  conn.on('close', () => activeConnections.delete(conn));
+});
 
 // ── Setup Health Check ──
 // Validates HCI configuration: hermes CLI, gateway API, TUI bridge, config
@@ -4900,6 +5528,471 @@ app.get('/api/setup/check', requireAuth, async (req, res) => {
   }
 
   res.json({ ok: true, checks: results });
+});
+
+// ── MCP Manager API Routes ──
+// MCP server registry — store in memory for now (PID tracking)
+const mcpProcesses = {}; // { name: { pid, status, started, logs: [], port, cmd } }
+
+/**
+ * Detect if an MCP server process is actually alive on the system.
+ * Uses pgrep to find processes matching the server's command.
+ * Returns { running: bool, pid: number|null, uptime: number|null }.
+ */
+function _detectMcpServerAlive(serverName, serverConfig) {
+  try {
+    const cmd = serverConfig.command || '';
+    if (!cmd) return { running: false, pid: null, uptime: null };
+
+    // Extract executable name for pgrep matching
+    // e.g. "/root/.local/bin/chrome-devtools-mcp-quiet" → "chrome-devtools-mcp-quiet"
+    // e.g. "npx" → we need to search for the actual package
+    const execName = path.basename(cmd);
+    
+    let pgrepPattern;
+    if (execName === 'npx' || execName === 'node') {
+      // For npx/node-based servers, search for the package/script name in args
+      const args = serverConfig.args || [];
+      const pkgName = args.find(a => !a.startsWith('-') && a !== '-y') || '';
+      pgrepPattern = pkgName ? `-f "${pkgName}"` : `-f "${execName}"`;
+    } else if (execName === 'uvx' || execName === 'python3' || execName === 'python') {
+      const args = serverConfig.args || [];
+      const pkgName = args.find(a => !a.startsWith('-')) || '';
+      pgrepPattern = pkgName ? `-f "${pkgName}"` : `-f "${execName}"`;
+    } else {
+      // Direct binary — match by executable name
+      pgrepPattern = `-f "${execName}"`;
+    }
+
+    const result = require('child_process').execSync(
+      `pgrep ${pgrepPattern} -o 2>/dev/null`, 
+      { timeout: 2000, encoding: 'utf8' }
+    ).trim();
+
+    if (result) {
+      const pid = parseInt(result, 10);
+      // Get process uptime from /proc
+      let uptime = null;
+      try {
+        const procStat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+        const fields = procStat.split(' ');
+        // field 21 (0-indexed: 21) = starttime in jiffies
+        const startTime = parseInt(fields[21], 10) || 0;
+        if (startTime > 0) {
+          const clkTck = 100; // Linux default
+          const procUptime = startTime / clkTck;
+          const sysUptime = parseFloat(fs.readFileSync('/proc/uptime', 'utf8').split(' ')[0]);
+          uptime = Math.floor(sysUptime - procUptime);
+        }
+      } catch { /* can't read proc */ }
+      return { running: true, pid, uptime };
+    }
+    return { running: false, pid: null, uptime: null };
+  } catch {
+    // pgrep failed (process not found or timeout)
+    return { running: false, pid: null, uptime: null };
+  }
+}
+
+function _getMcpConfig() {
+  try {
+    const hermesHome = path.join(os.homedir(), '.hermes');
+    const profilesDir = path.join(hermesHome, 'profiles');
+    const merged = {};
+
+    // Scan all profile configs for mcp_servers
+    if (fs.existsSync(profilesDir)) {
+      for (const prof of fs.readdirSync(profilesDir)) {
+        try {
+          const profPath = path.join(profilesDir, prof, 'config.yaml');
+          if (!fs.existsSync(profPath)) continue;
+          const raw = fs.readFileSync(profPath, 'utf8');
+          const config = yaml.load(raw) || {};
+          const servers = config.mcp_servers || config.mcp || {};
+          Object.assign(merged, servers);
+        } catch { /* skip broken configs */ }
+      }
+    }
+
+    // Also check root config.yaml (Hermes-level MCP)
+    try {
+      const rootPath = path.join(hermesHome, 'config.yaml');
+      if (fs.existsSync(rootPath)) {
+        const raw = fs.readFileSync(rootPath, 'utf8');
+        const config = yaml.load(raw) || {};
+        const servers = config.mcp_servers || config.mcp || {};
+        Object.assign(merged, servers);
+      }
+    } catch { /* skip */ }
+
+    return merged;
+  } catch { return {}; }
+}
+
+async function _saveMcpConfig(mcp) {
+  const hermesHome = path.join(os.homedir(), '.hermes');
+  const profilesDir = path.join(hermesHome, 'profiles');
+
+  // Find which profile has mcp_servers, or use first profile
+  let targetProf = null;
+  if (fs.existsSync(profilesDir)) {
+    for (const prof of fs.readdirSync(profilesDir)) {
+      try {
+        const profPath = path.join(profilesDir, prof, 'config.yaml');
+        if (!fs.existsSync(profPath)) continue;
+        const raw = fs.readFileSync(profPath, 'utf8');
+        const config = yaml.load(raw) || {};
+        if (config.mcp_servers || config.mcp) {
+          targetProf = prof;
+          break;
+        }
+      } catch { /* skip */ }
+    }
+    // Fallback: use first existing profile
+    if (!targetProf) {
+      const profs = fs.readdirSync(profilesDir).filter(p => {
+        return fs.existsSync(path.join(profilesDir, p, 'config.yaml'));
+      });
+      targetProf = profs[0] || 'david';
+    }
+  } else {
+    targetProf = 'david';
+  }
+
+  const profPath = path.join(profilesDir, targetProf, 'config.yaml');
+  if (!fs.existsSync(profPath)) {
+    throw new Error(`Profile config not found: ${profPath}`);
+  }
+  const raw = fs.readFileSync(profPath, 'utf8');
+  const config = yaml.load(raw) || {};
+  config.mcp_servers = mcp;
+  fs.writeFileSync(profPath, yaml.dump(config, { indent: 2, lineWidth: -1 }), 'utf8');
+}
+
+async function _getMcpTools(serverName) {
+  try {
+    const out = await shell(`npx mcporter list "${serverName}" --schema 2>/dev/null`);
+    if (!out || out.includes('not found')) return [];
+    // Parse JSON tools list
+    const jsonMatch = out.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return parsed.tools || [];
+    }
+    // Fallback: parse line-by-line
+    return out.split('\n').filter(l => l.trim() && !l.startsWith('Server')).map(l => ({
+      name: l.trim().split(':')[0]?.trim() || l.trim(),
+      description: l.trim().split(':')[1]?.trim() || '',
+    }));
+  } catch { return []; }
+}
+
+function _getMcpLogs(serverName) {
+  if (mcpProcesses[serverName] && mcpProcesses[serverName].logs) {
+    return mcpProcesses[serverName].logs.slice(-50);
+  }
+  return [];
+}
+
+// GET /api/mcp/servers — list all servers
+app.get('/api/mcp/servers', requireAuth, async (req, res) => {
+  try {
+    const mcpConfig = _getMcpConfig();
+    const servers = [];
+    for (const [name, cfg] of Object.entries(mcpConfig)) {
+      if (typeof cfg === 'object') {
+        const proc = mcpProcesses[name];
+        const type = cfg.command ? 'stdio' : (cfg.url ? 'http' : 'unknown');
+        
+        // Priority: HCI-tracked process > real process detection > stopped
+        let status, uptime, pid;
+        if (proc) {
+          status = proc.status;
+          uptime = Math.floor((Date.now() - proc.started) / 1000);
+          pid = proc.pid;
+        } else {
+          // Check if process is alive on the system (started by gateway)
+          const alive = _detectMcpServerAlive(name, cfg);
+          status = alive.running ? 'running' : 'stopped';
+          uptime = alive.uptime || 0;
+          pid = alive.pid || null;
+        }
+
+        servers.push({
+          name,
+          type,
+          status,
+          uptime,
+          pid,
+          tools: proc ? (proc.tools || []) : [],
+          toolCount: proc ? (proc.tools?.length || 0) : 0,
+          port: proc ? proc.port : null,
+        });
+      }
+    }
+    res.json({ ok: true, servers });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// GET /api/mcp/servers/:name — server detail
+app.get('/api/mcp/servers/:name', requireAuth, async (req, res) => {
+  const { name } = req.params;
+  const mcpConfig = _getMcpConfig();
+  if (!mcpConfig[name]) return res.status(404).json({ ok: false, error: 'server not found' });
+
+  const proc = mcpProcesses[name];
+  const cfg = mcpConfig[name];
+  const type = cfg.command ? 'stdio' : (cfg.url ? 'http' : 'unknown');
+  
+  // Priority: HCI-tracked process > real process detection > stopped
+  let status, uptime, pid, mem;
+  if (proc) {
+    status = proc.status;
+    uptime = Math.floor((Date.now() - proc.started) / 1000);
+    pid = proc.pid;
+    mem = proc.mem || 'N/A';
+  } else {
+    const alive = _detectMcpServerAlive(name, cfg);
+    status = alive.running ? 'running' : 'stopped';
+    uptime = alive.uptime || 0;
+    pid = alive.pid || null;
+    mem = alive.running ? 'N/A' : 'N/A';
+  }
+  
+  const tools = proc ? (proc.tools || []) : [];
+
+  res.json({
+    ok: true,
+    server: {
+      name,
+      type,
+      config: { ...cfg, env: cfg.env ? Object.keys(cfg.env).map(k => `${k}=***`) : [] },
+      status,
+      uptime,
+      pid,
+      memory: mem,
+      tools,
+      toolCount: tools.length,
+      logs: _getMcpLogs(name),
+    },
+  });
+});
+
+// GET /api/mcp/servers/:name/tools — tools list with schema
+app.get('/api/mcp/servers/:name/tools', requireAuth, async (req, res) => {
+  const { name } = req.params;
+  const tools = await _getMcpTools(name);
+  res.json({ ok: true, tools });
+});
+
+// GET /api/mcp/servers/:name/logs — logs
+app.get('/api/mcp/servers/:name/logs', requireAuth, async (req, res) => {
+  const { name } = req.params;
+  res.json({ ok: true, logs: _getMcpLogs(name) });
+});
+
+// POST /api/mcp/servers/:name/start — start server
+app.post('/api/mcp/servers/:name/start', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
+  const { name } = req.params;
+  const mcpConfig = _getMcpConfig();
+  if (!mcpConfig[name]) return res.status(404).json({ ok: false, error: 'server not found' });
+
+  try {
+    const cfg = mcpConfig[name];
+
+    // Already running?
+    if (mcpProcesses[name] && mcpProcesses[name].status === 'running') {
+      return res.json({ ok: true, message: 'already running', pid: mcpProcesses[name].pid });
+    }
+
+    const cmd = cfg.command || (cfg.url ? `npx mcporter serve "${cfg.url}"` : null);
+    if (!cmd) return res.json({ ok: false, error: 'no command or URL configured' });
+
+    // Spawn process
+    const env = { ...process.env, ...(cfg.env || {}) };
+    const proc = spawn('sh', ['-c', cmd], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    mcpProcesses[name] = {
+      pid: proc.pid,
+      status: 'starting',
+      started: Date.now(),
+      logs: [`[${new Date().toISOString()}] Starting: ${cmd}`],
+      port: null,
+      cmd,
+      proc,
+    };
+
+    proc.stdout.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean);
+      mcpProcesses[name].logs.push(...lines.map(l => `[${new Date().toISOString()}] ${l}`));
+      if (mcpProcesses[name].logs.length > 200) {
+        mcpProcesses[name].logs = mcpProcesses[name].logs.slice(-200);
+      }
+      if (!mcpProcesses[name].status === 'running') {
+        mcpProcesses[name].status = 'running';
+      }
+    });
+
+    proc.stderr.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean);
+      mcpProcesses[name].logs.push(...lines.map(l => `[STDERR] ${l}`));
+    });
+
+    proc.on('close', (code) => {
+      mcpProcesses[name].status = code === 0 ? 'stopped' : 'error';
+      mcpProcesses[name].logs.push(`[${new Date().toISOString()}] Process exited with code ${code}`);
+    });
+
+    proc.on('error', (err) => {
+      mcpProcesses[name].status = 'error';
+      mcpProcesses[name].logs.push(`[${new Date().toISOString()}] Error: ${err.message}`);
+    });
+
+    // Set running after 2s if still alive
+    setTimeout(() => {
+      if (mcpProcesses[name] && mcpProcesses[name].status === 'starting') {
+        mcpProcesses[name].status = 'running';
+        // Try to discover tools
+        _getMcpTools(name).then(tools => {
+          if (mcpProcesses[name]) mcpProcesses[name].tools = tools;
+        });
+      }
+    }, 2000);
+
+    res.json({ ok: true, message: 'started', pid: proc.pid });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// POST /api/mcp/servers/:name/stop — stop server
+app.post('/api/mcp/servers/:name/stop', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
+  const { name } = req.params;
+  if (!mcpProcesses[name]) return res.json({ ok: true, message: 'not running' });
+
+  try {
+    const proc = mcpProcesses[name];
+    if (proc.proc) {
+      proc.proc.kill('SIGTERM');
+      mcpProcesses[name].status = 'stopping';
+      mcpProcesses[name].logs.push(`[${new Date().toISOString()}] SIGTERM sent`);
+      // Force kill after 5s
+      setTimeout(() => {
+        if (mcpProcesses[name] && mcpProcesses[name].status === 'stopping') {
+          try { proc.proc.kill('SIGKILL'); } catch {}
+          mcpProcesses[name].status = 'stopped';
+          mcpProcesses[name].logs.push(`[${new Date().toISOString()}] Force killed`);
+        }
+      }, 5000);
+    }
+    res.json({ ok: true, message: 'stopping' });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// POST /api/mcp/servers/:name/restart — restart server
+app.post('/api/mcp/servers/:name/restart', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
+  const { name } = req.params;
+  // Stop first
+  if (mcpProcesses[name] && mcpProcesses[name].proc) {
+    try { mcpProcesses[name].proc.kill('SIGTERM'); } catch {}
+    mcpProcesses[name].status = 'stopped';
+    mcpProcesses[name].logs.push(`[${new Date().toISOString()}] Restarting...`);
+  }
+  // Wait 1s then start
+  setTimeout(async () => {
+    // Create a minimal req/res for internal use
+    const fakeReq = { params: { name } };
+    const fakeRes = { status: () => ({ json: () => {} }), json: () => {} };
+    await app._router.stack.find(l => l.route && l.route.path === '/api/mcp/servers/:name/start')
+      ?.route?.stack[0]?.handle(fakeReq, fakeRes);
+  }, 1000);
+
+  res.json({ ok: true, message: 'restarting' });
+});
+
+// POST /api/mcp/servers/:name/test — test a tool
+app.post('/api/mcp/servers/:name/test', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
+  const { name } = req.params;
+  const { tool, params } = req.body;
+  if (!tool) return res.json({ ok: false, error: 'tool name required' });
+
+  try {
+    const paramStr = params ? Object.entries(params).map(([k, v]) => `${k}=${v}`).join(' ') : '';
+    const out = await shell(`npx mcporter call "${name}.${tool}" ${paramStr} 2>&1`);
+    res.json({ ok: true, result: out });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// GET /api/mcp/servers/:name/config — server config
+app.get('/api/mcp/servers/:name/config', requireAuth, async (req, res) => {
+  const { name } = req.params;
+  const mcpConfig = _getMcpConfig();
+  if (!mcpConfig[name]) return res.status(404).json({ ok: false, error: 'server not found' });
+  res.json({ ok: true, config: mcpConfig[name] });
+});
+
+// PUT /api/mcp/servers/:name/config — edit server config
+app.put('/api/mcp/servers/:name/config', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
+  const { name } = req.params;
+  const mcpConfig = _getMcpConfig();
+  if (!mcpConfig[name]) return res.status(404).json({ ok: false, error: 'server not found' });
+
+  try {
+    mcpConfig[name] = { ...mcpConfig[name], ...req.body };
+    await _saveMcpConfig(mcpConfig);
+    res.json({ ok: true, message: 'config updated' });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// POST /api/mcp/add — add new server
+app.post('/api/mcp/add', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
+  const { name, command, url, args, env, headers } = req.body;
+  if (!name) return res.json({ ok: false, error: 'name required' });
+  if (!command && !url) return res.json({ ok: false, error: 'command or url required' });
+
+  try {
+    const mcpConfig = _getMcpConfig();
+    if (mcpConfig[name]) return res.json({ ok: false, error: `server "${name}" already exists` });
+
+    const cfg = { type: command ? 'stdio' : 'http' };
+    if (command) cfg.command = args ? `${command} ${args}` : command;
+    if (url) cfg.url = url;
+    if (env && Object.keys(env).length) cfg.env = env;
+    if (headers && Object.keys(headers).length) cfg.headers = headers;
+
+    mcpConfig[name] = cfg;
+    await _saveMcpConfig(mcpConfig);
+    res.json({ ok: true, message: 'added', name });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// DELETE /api/mcp/servers/:name — remove server
+app.delete('/api/mcp/servers/:name', requireAuth, requireRole('admin'), requireCsrf, async (req, res) => {
+  const { name } = req.params;
+  const mcpConfig = _getMcpConfig();
+  if (!mcpConfig[name]) return res.status(404).json({ ok: false, error: 'server not found' });
+
+  try {
+    // Stop if running
+    if (mcpProcesses[name] && mcpProcesses[name].proc) {
+      try { mcpProcesses[name].proc.kill('SIGKILL'); } catch {}
+      delete mcpProcesses[name];
+    }
+    delete mcpConfig[name];
+    await _saveMcpConfig(mcpConfig);
+    res.json({ ok: true, message: 'removed' });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
 });
 
 // ── WebSocket Chat Gateway Bridge ──
@@ -5150,7 +6243,10 @@ wss.on('connection', async (socket, req) => {
       }
       if (msg.type === 'chat.send' && socket.authed && socket.tuiBridge) {
         try {
-          await socket.tuiBridge.chatSend({ message: msg.message, session_id: socket.tuiSessionId });
+          // Use frontend's session_id if provided, else fall back to chat.start session
+          const sid = msg.session_id || socket.tuiSessionId;
+          if (msg.session_id) socket.tuiSessionId = msg.session_id; // update for future sends
+          await socket.tuiBridge.chatSend({ message: msg.message, session_id: sid });
         } catch (err) {
           socket.send(JSON.stringify({ type: 'chat.error', error: err.message }));
         }
@@ -5206,33 +6302,68 @@ log('system.started', 'Hermes Control Interface booted');
 getInsights().catch(() => {});
 
 // Lightweight system metrics broadcast every 5 seconds (no hermes commands)
-setInterval(() => {
+const metricsInterval = setInterval(() => {
   broadcastToClients({
     type: 'system-metrics',
     payload: getSystem(),
   });
 }, 5000);
 
-// Graceful shutdown
+// ── Graceful shutdown ──
+let shuttingDown = false;
+
 function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
   log('system.shutdown', `received ${signal}, shutting down gracefully`);
-  // Kill TUI bridges
+
+  // 1. Stop recurring timers
+  clearInterval(metricsInterval);
+  clearInterval(tokenCleanupInterval);
+
+  // 2. Stop log streaming subprocess
+  stopLogStream();
+
+  // 3. Kill TUI bridges
   killAllBridges();
-  // Kill PTY process
+
+  // 4. Kill PTY process
   if (terminalSession.proc) {
     try { terminalSession.proc.kill(); } catch {}
   }
-  // Close WebSocket connections
+
+  // 5. Close all WebSocket connections
   for (const client of wss.clients) {
     try { client.close(1001, 'server shutting down'); } catch {}
   }
-  // Close server
+
+  // 6. Close idle HTTP connections immediately (Node 18.2+)
+  if (typeof server.closeIdleConnections === 'function') {
+    server.closeIdleConnections();
+  }
+
+  // 7. Stop accepting new connections
   server.close(() => {
     log('system.shutdown', 'server closed');
     process.exit(0);
   });
-  // Force exit after 5 seconds
-  setTimeout(() => process.exit(1), 5000);
+
+  // 8. Grace period: destroy lingering connections after 3s
+  setTimeout(() => {
+    if (activeConnections.size > 0) {
+      log('system.shutdown', `destroying ${activeConnections.size} lingering connections`);
+      for (const conn of activeConnections) {
+        try { conn.destroy(); } catch {}
+      }
+    }
+  }, 3000);
+
+  // 9. Force exit after 10 seconds
+  setTimeout(() => {
+    log('system.shutdown', 'force exit after timeout');
+    process.exit(1);
+  }, 10000);
 }
 
 // Error handlers — prevent silent crashes
@@ -5243,8 +6374,7 @@ process.on('unhandledRejection', (reason, promise) => {
 process.on('uncaughtException', (err) => {
   console.error('[UNCAUGHT EXCEPTION]', err);
   log('system.error', `uncaught exception: ${err.message}`);
-  // Give time to log, then exit
-  setTimeout(() => process.exit(1), 1000);
+  shutdown('uncaughtException');
 });
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

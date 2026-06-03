@@ -3,15 +3,14 @@ const { defineConfig } = require('@playwright/test');
 const path = require('path');
 
 module.exports = defineConfig({
-  testDir: './test',
-  testMatch: '**/*.spec.js',
+  testDir: './tests',
+  testMatch: '**/*.test.js',
   timeout: 30000,
   retries: 0,
   workers: 1,
-  globalSetup: './test/global-setup.js',
-  reporter: [['list'], ['json', { outputFile: '/tmp/playwright-office-results.json' }]],
+  globalSetup: undefined,
+  reporter: [['list'], ['html', { outputFolder: '/tmp/playwright-hci-report' }]],
   use: {
-    baseURL: 'http://localhost:8790',
     headless: true,
     viewport: { width: 1280, height: 800 },
     screenshot: 'only-on-failure',
