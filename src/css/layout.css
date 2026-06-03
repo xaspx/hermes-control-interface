@@ -17,6 +17,8 @@
   background: color-mix(in oklab, var(--bg-base) 90%, transparent);
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border);
+  transform: translateZ(0);
+  will-change: backdrop-filter;
 }
 
 .topbar-left {
