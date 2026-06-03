@@ -187,3 +187,206 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for zero-downtime deploys.
 
 Built for the [Hermes Agent](https://github.com/NousResearch/hermes-agent) ecosystem.  
 [@bayendor](https://x.com/bayendor) · [GitHub](https://github.com/xaspx/hermes-control-interface)
+
+---
+
+## ❓ Frequently Asked Questions
+
+### General
+
+**Q: What is Hermes Control Interface (HCI)?**
+
+HCI is a **self-hosted web dashboard** for the Hermes AI agent stack. Manage agents, chat, terminals, files, cron, token analytics, MCP servers, and swarm pipelines — all behind a password gate.
+
+**Q: What can I manage with HCI?**
+
+| Page | Capabilities |
+|---|---|
+| **Home** | System health, agent overview, gateway status, token usage |
+| **Chat** | Real-time streaming, tool call cards, multi-profile |
+| **Agents** | Profile CRUD, gateway lifecycle, dashboard/sessions/cron |
+| **Office** | 3-panel swarm monitor — agent health, kanban, live feed |
+| **Monitor** | Gateway logs, CPU/RAM metrics, live process view |
+| **Usage** | Token analytics, daily trends, cost projections, alerts |
+| **Logs** | Agent/error/gateway logs with level filter |
+| **Skills** | Browse, install, remove Hermes skills |
+| **Files** | Browse and edit server files |
+| **MCP** | Start, stop, restart MCP servers, log tail, config editor |
+| **Maintenance** | Backup, restore, HCI update, system doctor |
+
+### Features
+
+**Q: What is Office v3 — ZOO Swarm Monitor?**
+
+Three-panel dashboard with **zero-subprocess agent states** (~100ms vs 3000ms):
+
+- **Agents Panel** — health grid via config.yaml + kanban.db
+- **Kanban Panel** — 8 status lanes (triage→done), dependency arrows
+- **Live Feed** — 50 events from gateway logs, agent filter, keyword search
+- **Task Popup** — run history, workspace file browser, event enrichment
+
+**Q: What chat features are available?**
+
+| Feature | Description |
+|---|---|
+| **Real-time streaming** | WebSocket gateway API |
+| **Multi-profile** | Profile switcher for different agents |
+| **Tool call cards** | Collapsible JSON viewer |
+| **Stop button** | Pause streaming mid-conversation |
+| **Session resume** | Continue previous conversation |
+| **Fork from message** | Branch conversation from any point |
+
+**Q: What is MCP Manager?**
+
+Full operational control plane for MCP servers:
+- List, start, stop, restart servers
+- Live log tail from browser
+- Config editor (JSON/YAML)
+- 11 REST API routes
+
+### Installation
+
+**Q: How do I install HCI?**
+
+```bash
+git clone https://github.com/xaspx/hermes-control-interface.git
+cd hermes-control-interface
+cp .env.example .env     # set HERMES_CONTROL_PASSWORD + HERMES_CONTROL_SECRET
+npm install && npm run build
+node server.js            # → http://localhost:10274
+```
+
+See [docs/INSTALL.md](docs/INSTALL.md) for production setup.
+
+**Q: What are the requirements?**
+
+- Node.js 20+
+- Hermes Agent installed on same machine
+- `hermes` CLI available on PATH
+
+**Q: How do I update HCI?**
+
+```bash
+git pull origin main
+npm install
+npm run build
+systemctl restart hci-staging
+```
+
+### Tech Stack
+
+**Q: What technologies does HCI use?**
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | Vanilla JS + Vite |
+| **Backend** | Node.js + Express + WebSocket |
+| **Terminal** | xterm.js |
+| **Charts** | Chart.js |
+| **Database** | better-sqlite3 |
+| **Version** | 3.6.0 |
+
+### Security
+
+**Q: What security features are included?**
+
+| Feature | Implementation |
+|---|---|
+| **CSP** | No `unsafe-eval` |
+| **CSRF** | All mutating endpoints |
+| **Rate limiting** | Global + chat |
+| **WebSocket RBAC** | Role-based access |
+| **Path traversal** | Prevention |
+| **XSS** | Protection |
+| **Permissions** | 20 across 3 roles (admin, viewer, custom) |
+
+### PWA
+
+**Q: Can I install HCI as a PWA?**
+
+Yes!
+- Installable to homescreen
+- Service worker with offline caching
+- Auto-update on new version
+
+### Configuration
+
+**Q: What environment variables are required?**
+
+| Variable | Default | Description |
+|---|---|---|
+| `HERMES_CONTROL_PASSWORD` | — | Login password (bcrypt) |
+| `HERMES_CONTROL_SECRET` | — | Session secret |
+| `PORT` | `10274` | Server port |
+| `HERMES_CONTROL_HOME` | `~/.hermes` | Hermes state directory |
+| `HERMES_PROJECTS_ROOT` | parent of repo | Projects directory |
+
+See [docs/CONFIG.md](docs/CONFIG.md) for full list.
+
+### API
+
+**Q: What REST API endpoints are available?**
+
+| Endpoint | Auth | Description |
+|---|---|---|
+| `GET /api/office/kanban?board=` | Login | Kanban board |
+| `GET /api/office/kanban/:id?board=` | Login | Task detail |
+| `GET /api/office/kanban/:id/workspace-file` | Login | Read workspace files |
+| `POST /api/office/kanban/:id/action` | Login+CSRF | Quick actions |
+| `GET /api/office/agent-states` | Login | Agent health grid |
+| `GET /api/office/events` | Admin | Live feed |
+| `GET /api/office/summary?board=` | Login | Board stats |
+
+See [docs/API.md](docs/API.md) for full reference.
+
+### Architecture
+
+**Q: What is the HCI architecture?**
+
+```
+Browser (11 pages, SPA)
+       │
+   HTTPS :10274
+       │
+   Express Server (server.js — 6.4K lines)
+       ├── Auth (bcrypt, sessions, CSRF)
+       ├── RBAC (20 permissions, 3 roles)
+       ├── REST API (30+ routes)
+       ├── WebSocket (real-time)
+       │
+       ├── Hermes CLI (agent states, gateway control)
+       ├── SQLite (kanban.db — task pipeline)
+       ├── Filesystem (config.yaml, logs, skills)
+       └── External (MCP servers, token pricing)
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
+
+### Documentation
+
+**Q: Where can I find more documentation?**
+
+| Doc | Content |
+|---|---|
+| [INSTALL.md](docs/INSTALL.md) | nginx, systemd, Cloudflare |
+| [CONFIG.md](docs/CONFIG.md) | All environment variables |
+| [API.md](docs/API.md) | REST API reference |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions, data flow |
+| [SECURITY.md](docs/SECURITY.md) | CSP, CSRF, auth, hardening |
+| [DEPLOY.md](docs/DEPLOY.md) | Zero-downtime deploys |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and fixes |
+| [CHANGELOG.md](docs/CHANGELOG.md) | Version history |
+
+### Community & Support
+
+| Resource | Link |
+|---|---|
+| **GitHub Issues** | [github.com/xaspx/hermes-control-interface/issues](https://github.com/xaspx/hermes-control-interface/issues) |
+| **Twitter** | [@bayendor](https://x.com/bayendor) |
+| **Hermes Agent** | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) |
+
+### License
+
+**Q: Is Hermes Control Interface free and open source?**
+
+Yes! **MIT License** - see [LICENSE](LICENSE). Self-host for free, manage your Hermes agent stack with a beautiful web UI.
