@@ -186,7 +186,7 @@ function renderChatContent(text) {
     // Use unique placeholder so we can find it after innerHTML
     const placeholder = `__CODE_CONTENT_${i}__`;
     html = html.replace(
-      `\\x00CODE${i}\\x00`,
+      `\x00CODE${i}\x00`,
       `<pre style="position:relative;padding-top:22px;">${langLabel}<button class="code-copy-btn" onclick="copyCodeBlock(this)" data-i18n="auto.copy">Copy</button><code class="${langClass}">${placeholder}</code></pre>`
     );
   });
