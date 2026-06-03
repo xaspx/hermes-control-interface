@@ -492,8 +492,6 @@
   color: var(--fg);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 250px;
-  overflow-y: auto;
   background: var(--bg-card);
   padding: 10px;
   border-radius: var(--radius);
