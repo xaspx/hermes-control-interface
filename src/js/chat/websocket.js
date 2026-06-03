@@ -48,7 +48,7 @@ async function sendViaWebSocket(text, profile, sessionId) {
     // Send via WS — use chatStart for first message, chatSend for subsequent
     let ok;
     if (sessionId) {
-      ok = wsClient.chatSend({ message: text, session_id: sessionId });
+      ok = wsClient.chatSend({ message: text, session_id: sessionId, profile });
     } else {
       ok = wsClient.chatStart({ message: text, profile, session_id: sessionId });
     }

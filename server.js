@@ -6239,14 +6239,45 @@ wss.on('connection', async (socket, req) => {
         }
       }
       if (msg.type === 'chat.stop' && socket.authed && socket.tuiBridge) {
-        socket.tuiBridge.chatStop(socket.tuiSessionId);
+        socket.tuiBridge.chatStop(msg.session_id || socket.tuiSessionId);
       }
-      if (msg.type === 'chat.send' && socket.authed && socket.tuiBridge) {
+      if (msg.type === 'chat.send' && socket.authed) {
         try {
-          // Use frontend's session_id if provided, else fall back to chat.start session
-          const sid = msg.session_id || socket.tuiSessionId;
-          if (msg.session_id) socket.tuiSessionId = msg.session_id; // update for future sends
-          await socket.tuiBridge.chatSend({ message: msg.message, session_id: sid });
+          if (!socket.tuiBridge) {
+            const profileName = msg.profile || 'default';
+            console.log(`[WS] chat.send bootstrapping bridge profile="${profileName}" session_id="${msg.session_id || 'null'}"`);
+            const bridge = getBridge(profileName);
+            if (!bridge.proc) {
+              let startErr = null;
+              for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                  await bridge.start();
+                  startErr = null;
+                  break;
+                } catch (e) {
+                  startErr = e;
+                  console.error(`[WS] Bridge start attempt ${attempt}/3 failed:`, e.message);
+                  if (attempt < 3) await new Promise(r => setTimeout(r, 500));
+                }
+              }
+              if (startErr) {
+                socket.send(JSON.stringify({ type: 'chat.error', error: 'TUI gateway unavailable after 3 retries.' }));
+                return;
+              }
+            }
+            bridge.addClient(socket);
+            socket.tuiBridge = bridge;
+          }
+          if (msg.session_id && msg.session_id !== socket.tuiSessionId) {
+            const result = await socket.tuiBridge.chatStart({
+              message: msg.message,
+              session_id: msg.session_id,
+            });
+            socket.tuiSessionId = result.session_id;
+          } else {
+            const sid = msg.session_id || socket.tuiSessionId;
+            await socket.tuiBridge.chatSend({ message: msg.message, session_id: sid });
+          }
         } catch (err) {
           socket.send(JSON.stringify({ type: 'chat.error', error: err.message }));
         }
