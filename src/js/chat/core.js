@@ -482,6 +482,7 @@ async function loadChatSession(sessionId, offset = 0) {
     const data = await r.json();
     if (titleEl) {
       titleEl.textContent = toDisplayText(resolveSessionDisplayTitle({ sessionId, data }));
+      titleEl.removeAttribute('data-i18n');
     }
     if (subtitleEl) subtitleEl.textContent = `${data.messages?.length || 0} messages · ${profile}`;
 
@@ -658,7 +659,10 @@ function newChatSession() {
 
   // Reset UI
   const titleEl = document.getElementById('chat-title');
-  if (titleEl) titleEl.textContent = t('ui.newChat');
+  if (titleEl) {
+    titleEl.setAttribute('data-i18n', 'auto.newChat2');
+    titleEl.textContent = t('ui.newChat');
+  }
   const subtitleEl = document.getElementById('chat-subtitle');
   if (subtitleEl) subtitleEl.textContent = '';
   const statusSessionEl = document.getElementById('chat-status-session');
@@ -774,7 +778,15 @@ async function renameChatSession(sessionId = 0) {
   try {
     const profile = document.getElementById('chat-profile')?.value || 'default';
     const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrfToken || '' }, body: JSON.stringify({ title: n, profile }), credentials: 'include' });
-    if (r.ok) { showToast(t('toast.sessionRenamed'), 'success'); document.getElementById('chat-title').textContent = n; refreshChatSidebar(); } else showToast(t('toast.renameFailed'), 'error');
+    if (r.ok) {
+      showToast(t('toast.sessionRenamed'), 'success');
+      const renamed = document.getElementById('chat-title');
+      if (renamed) {
+        renamed.textContent = n;
+        renamed.removeAttribute('data-i18n');
+      }
+      refreshChatSidebar();
+    } else showToast(t('toast.renameFailed'), 'error');
   } catch (e) { showToast(t('toast.renameFailedPrefix') + e.message, 'error'); }
 }
 
@@ -804,14 +816,20 @@ function updateChatHeader() {
   const subtitleEl = document.getElementById('chat-subtitle');
   const profile = document.getElementById('chat-profile')?.value || 'default';
   if (!sid) {
-    if (titleEl) titleEl.textContent = t('ui.newChat');
+    if (titleEl) {
+      titleEl.setAttribute('data-i18n', 'auto.newChat2');
+      titleEl.textContent = t('ui.newChat');
+    }
     if (subtitleEl) subtitleEl.textContent = profile !== 'default' ? `Profile: ${profile}` : '';
     return;
   }
   // Find session title from sidebar
   const item = document.querySelector(`.chat-session-item[data-sid="${sid}"]`);
   const sidebarTitle = item?.dataset?.title || '';
-  if (titleEl) titleEl.textContent = sidebarTitle || sid.substring(0, 20) + '...';
+  if (titleEl) {
+    titleEl.textContent = sidebarTitle || sid.substring(0, 20) + '...';
+    titleEl.removeAttribute('data-i18n');
+  }
   if (subtitleEl) subtitleEl.textContent = `${profile !== 'default' ? profile + ' · ' : ''}${sid.substring(0, 16)}`;
 }
 
