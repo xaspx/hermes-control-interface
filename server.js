@@ -6208,7 +6208,13 @@ wss.on('connection', async (socket, req) => {
       // ── Chat via WebSocket (TUI Gateway) ──
       if (msg.type === 'chat.start' && socket.authed) {
         console.log(`[WS] chat.start received profile="${msg.profile || 'default'}" session_id="${msg.session_id || 'null'}"`);
-        const bridge = getBridge(msg.profile || 'default');
+        const profileName = msg.profile || 'default';
+        if (socket.tuiBridge && socket.tuiBridge.profile !== profileName) {
+          socket.tuiBridge.removeClient(socket);
+          socket.tuiBridge = null;
+          socket.tuiSessionId = undefined;
+        }
+        const bridge = getBridge(profileName);
         if (!bridge.proc) {
           let startErr = null;
           for (let attempt = 1; attempt <= 3; attempt++) {
@@ -6243,8 +6249,13 @@ wss.on('connection', async (socket, req) => {
       }
       if (msg.type === 'chat.send' && socket.authed) {
         try {
+          const profileName = msg.profile || 'default';
+          if (socket.tuiBridge && socket.tuiBridge.profile !== profileName) {
+            socket.tuiBridge.removeClient(socket);
+            socket.tuiBridge = null;
+            socket.tuiSessionId = undefined;
+          }
           if (!socket.tuiBridge) {
-            const profileName = msg.profile || 'default';
             console.log(`[WS] chat.send bootstrapping bridge profile="${profileName}" session_id="${msg.session_id || 'null'}"`);
             const bridge = getBridge(profileName);
             if (!bridge.proc) {
