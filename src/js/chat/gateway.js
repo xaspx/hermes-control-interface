@@ -1,7 +1,7 @@
 import { state, t, wsClient } from '../core/state.js';;
 import { addToolCallCard, finalizeToolCard, highlightCodeBlocks, renderChatContent, swapOptimisticMessage, updateStreamContent, updateToolProgress } from './cli.js';
 import { handleArtifact, playChatComplete, refreshChatSidebar, reloadCurrentSessionMessages, sendChatMessage, updateChatHeader, updateQueueBadge, updateToolCountUI } from './core.js';
-import { closeModal, showModal } from '../components/modal.js';
+import { showModal } from '../components/modal.js';
 import { escapeHtml } from '../core/utils.js';
 
 async function sendViaGatewayAPI(text, profile, sessionId, contentDiv, messagesDiv, startTime) {
@@ -412,76 +412,85 @@ function handleSubagentEvent(type, payload) {
   }
 }
 
-function showClarifyModal(question, choices, requestId) {
+// The four agent-prompted modals use showModal's {message, inputs, buttons}
+// shape from src/js/components/modal.js. A null result (click-outside or
+// Cancel) sends a negative response so the agent unblocks and the chat
+// lock clears naturally via chat.done/chat.error.
+async function showClarifyModal(question, choices, requestId) {
   if (!choices || choices.length === 0) {
-    // Open-ended: text input
-    showModal({
+    const result = await showModal({
       title: 'Clarification Needed',
-      body: `<p>${escapeHtml(question)}</p><input type="text" id="clarify-input" class="modal-input" placeholder="Your answer..." style="width:100%;margin-top:12px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--fg);">`,
-      confirmText: 'Submit',
-      onConfirm: () => {
-        const input = document.getElementById('clarify-input');
-        if (input) wsClient.clarifyRespond(requestId, input.value);
-      }
+      message: `<p>${escapeHtml(question)}</p>`,
+      inputs: [{ type: 'text', placeholder: 'Your answer...' }],
+      buttons: [
+        { text: 'Cancel', value: null },
+        { text: 'Submit', primary: true, value: 'ok' },
+      ],
     });
+    if (!result || result.action === null) {
+      wsClient.clarifyRespond(requestId, '');
+    } else {
+      wsClient.clarifyRespond(requestId, result.inputs?.[0] || '');
+    }
   } else {
-    // Multiple choice
-    const buttons = choices.map(c => 
-      `<button class="modal-choice-btn" data-choice="${escapeHtml(c)}" style="display:block;width:100%;margin:4px 0;padding:10px;text-align:left;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--fg);cursor:pointer;">${escapeHtml(c)}</button>`
-    ).join('');
-    showModal({
+    const result = await showModal({
       title: 'Clarification Needed',
-      body: `<p>${escapeHtml(question)}</p><div style="margin-top:12px;">${buttons}</div>`,
-      showCancel: false,
-      confirmText: null,
-      onRender: () => {
-        document.querySelectorAll('.modal-choice-btn').forEach(btn => {
-          btn.onclick = () => {
-            wsClient.clarifyRespond(requestId, null, btn.dataset.choice);
-            closeModal();
-          };
-        });
-      }
+      message: `<p>${escapeHtml(question)}</p>`,
+      buttons: choices.map(c => ({ text: c, value: c })),
     });
+    if (!result) {
+      wsClient.clarifyRespond(requestId, null, null);
+    } else {
+      wsClient.clarifyRespond(requestId, null, result.action);
+    }
   }
 }
 
-function showApprovalModal(command, description) {
-  showModal({
+async function showApprovalModal(command, description) {
+  const result = await showModal({
     title: 'Approval Required',
-    body: `
+    message: `
       <p>${escapeHtml(description || 'The agent wants to run a command:')}</p>
       <pre style="margin-top:12px;padding:12px;background:var(--bg-dark);border-radius:8px;overflow-x:auto;"><code>${escapeHtml(command)}</code></pre>
     `,
-    confirmText: '✅ Approve',
-    cancelText: '❌ Deny',
-    onConfirm: () => wsClient.approvalRespond(true, command),
-    onCancel: () => wsClient.approvalRespond(false, command),
+    buttons: [
+      { text: '❌ Deny', value: false },
+      { text: '✅ Approve', primary: true, value: true },
+    ],
   });
+  if (result?.action === true) {
+    wsClient.approvalRespond(true, command);
+  } else {
+    wsClient.approvalRespond(false, command);
+  }
 }
 
-function showSudoModal(requestId) {
-  showModal({
+async function showSudoModal(requestId) {
+  const result = await showModal({
     title: 'Sudo Password Required',
-    body: `<p data-i18n="auto.theAgentNeedsSudoPrivilegesEnterYourPassword">The agent needs sudo privileges. Enter your password:</p><input type="password" id="sudo-input" class="modal-input" placeholder="Password" style="width:100%;margin-top:12px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--fg);">`,
-    confirmText: 'Submit',
-    onConfirm: () => {
-      const input = document.getElementById('sudo-input');
-      if (input) wsClient.sudoRespond(requestId, input.value);
-    }
+    message: '<p data-i18n="auto.theAgentNeedsSudoPrivilegesEnterYourPassword">The agent needs sudo privileges. Enter your password:</p>',
+    inputs: [{ type: 'password', placeholder: 'Password' }],
+    buttons: [
+      { text: 'Cancel', value: null },
+      { text: 'Submit', primary: true, value: 'ok' },
+    ],
   });
+  const password = (result && result.action !== null) ? (result.inputs?.[0] || '') : '';
+  wsClient.sudoRespond(requestId, password);
 }
 
-function showSecretModal(envVar, prompt, requestId) {
-  showModal({
+async function showSecretModal(envVar, prompt, requestId) {
+  const result = await showModal({
     title: `Secret Required: ${escapeHtml(envVar)}`,
-    body: `<p>${escapeHtml(prompt || `Enter value for ${envVar}:`)}</p><input type="password" id="secret-input" class="modal-input" placeholder="Value" style="width:100%;margin-top:12px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--fg);">`,
-    confirmText: 'Submit',
-    onConfirm: () => {
-      const input = document.getElementById('secret-input');
-      if (input) wsClient.secretRespond(requestId, input.value);
-    }
+    message: `<p>${escapeHtml(prompt || `Enter value for ${envVar}:`)}</p>`,
+    inputs: [{ type: 'password', placeholder: 'Value' }],
+    buttons: [
+      { text: 'Cancel', value: null },
+      { text: 'Submit', primary: true, value: 'ok' },
+    ],
   });
+  const value = (result && result.action !== null) ? (result.inputs?.[0] || '') : '';
+  wsClient.secretRespond(requestId, value);
 }
 
 function ensureThinkingPanel(messagesDiv) {
