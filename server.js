@@ -542,13 +542,20 @@ app.post('/api/gateway/responses', requireAuth, requirePerm('chat.use'), async (
 });
 
 app.post('/api/chat/send', requireAuth, requirePerm('chat.use'), chatLimiter, async (req, res) => {
-  const { message, profile, sessionId, model } = req.body || {};
+  const { message, profile, sessionId, model, workspace } = req.body || {};
   if (!message || typeof message !== 'string') return res.status(400).json({ error: 'message required' });
 
   const prof = sanitizeProfileName(profile) || 'default';
 
+  // Prepend workspace context if provided
+  let chatMessage = message;
+  if (workspace && typeof workspace === 'string' && workspace.trim()) {
+    const resolvedWs = workspace.replace(/^~/, os.homedir());
+    chatMessage = `[WORKSPACE: ${resolvedWs}] Work in the directory: ${resolvedWs}. You have full access to read, write, search, and run commands in this project folder.\n\n${message}`;
+  }
+
   // Build hermes command
-  const escapedMsg = "'" + message.replace(/'/g, "'\\''") + "'";
+  const escapedMsg = "'" + chatMessage.replace(/'/g, "'\\''") + "'";
   const profileFlag = prof !== 'default' ? `-p ${prof}` : '';
   const modelFlag = model ? `-m ${model}` : '';
   // Resume existing session, or create new with empty --continue flag
@@ -2880,6 +2887,134 @@ app.get('/api/files/list', requireAuth, (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message || 'failed to list directory' });
+  }
+});
+
+// ── Workspace API ──────────────────────────────────────────────────────────
+// Persistent workspace directory for the workspace page
+
+const WORKSPACE_STORE = path.join(CONTROL_HOME, 'workspace.json');
+
+function loadWorkspace() {
+  try {
+    if (fs.existsSync(WORKSPACE_STORE)) {
+      return JSON.parse(fs.readFileSync(WORKSPACE_STORE, 'utf8'));
+    }
+  } catch {}
+  return { path: '' };
+}
+
+function saveWorkspace(data) {
+  try {
+    if (!fs.existsSync(CONTROL_HOME)) fs.mkdirSync(CONTROL_HOME, { recursive: true });
+    fs.writeFileSync(WORKSPACE_STORE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (e) {
+    log('workspace.saveError', e.message);
+  }
+}
+
+app.get('/api/workspace', requireAuth, (req, res) => {
+  const ws = loadWorkspace();
+  const listDir = String(req.query.listDir || '');
+  let files = null;
+
+  if (listDir && ws.path) {
+    const baseDir = path.resolve(ws.path);
+    try {
+      if (!fs.existsSync(baseDir) || !fs.statSync(baseDir).isDirectory()) {
+        files = { error: 'workspace directory does not exist or is not a directory' };
+      } else {
+        const dirPath = listDir === '/' ? baseDir : path.resolve(baseDir, listDir.replace(/^\/+/, ''));
+        if (!dirPath.startsWith(baseDir)) {
+          files = { error: 'path outside workspace' };
+        } else if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
+          files = { error: 'not a directory' };
+        } else {
+          const items = fs.readdirSync(dirPath).map(name => {
+            try {
+              const itemPath = path.join(dirPath, name);
+              const stat = fs.statSync(itemPath);
+              return { name, type: stat.isDirectory() ? 'directory' : 'file', size: stat.size, modified: stat.mtime.toISOString() };
+            } catch { return { name, type: 'unknown' }; }
+          });
+          items.sort((a, b) => {
+            if (a.type === 'directory' && b.type !== 'directory') return -1;
+            if (a.type !== 'directory' && b.type === 'directory') return 1;
+            return a.name.localeCompare(b.name);
+          });
+          files = { items, currentDir: listDir, parent: listDir === '/' ? null : path.dirname(listDir) };
+        }
+      }
+    } catch (e) {
+      files = { error: e.message };
+    }
+  }
+
+  res.json({ ok: true, path: ws.path, files });
+});
+
+app.post('/api/workspace', requireAuth, requireCsrf, (req, res) => {
+  const { path: wsPath } = req.body || {};
+  if (!wsPath || typeof wsPath !== 'string') {
+    return res.status(400).json({ error: 'path required' });
+  }
+  const resolved = path.resolve(wsPath.replace(/^~/, os.homedir()));
+  if (!fs.existsSync(resolved)) {
+    return res.status(400).json({ error: 'directory does not exist' });
+  }
+  if (!fs.statSync(resolved).isDirectory()) {
+    return res.status(400).json({ error: 'not a directory' });
+  }
+  saveWorkspace({ path: resolved });
+  log('workspace.set', resolved);
+  res.json({ ok: true, path: resolved });
+});
+
+// ── Workspace File Read/Write ──────────────────────────────────────────
+
+app.get('/api/workspace/file', requireAuth, (req, res) => {
+  const ws = loadWorkspace();
+  if (!ws.path) return res.status(400).json({ error: 'no workspace set' });
+
+  const requested = String(req.query.path || '');
+  if (!requested) return res.status(400).json({ error: 'path required' });
+
+  const baseDir = path.resolve(ws.path);
+  const absPath = path.resolve(baseDir, requested.replace(/^\/+/, ''));
+  if (!absPath.startsWith(baseDir)) return res.status(403).json({ error: 'path outside workspace' });
+
+  try {
+    if (!fs.existsSync(absPath)) return res.status(404).json({ error: 'file not found' });
+    if (fs.statSync(absPath).isDirectory()) return res.status(400).json({ error: 'is a directory' });
+
+    const content = fs.readFileSync(absPath, 'utf8');
+    res.json({ ok: true, path: requested, content });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/workspace/file', requireAuth, requireCsrf, (req, res) => {
+  const ws = loadWorkspace();
+  if (!ws.path) return res.status(400).json({ error: 'no workspace set' });
+
+  const { path: requested, content } = req.body || {};
+  if (!requested) return res.status(400).json({ error: 'path required' });
+  if (content === undefined) return res.status(400).json({ error: 'content required' });
+
+  const baseDir = path.resolve(ws.path);
+  const absPath = path.resolve(baseDir, requested.replace(/^\/+/, ''));
+  if (!absPath.startsWith(baseDir)) return res.status(403).json({ error: 'path outside workspace' });
+
+  try {
+    // Ensure parent directory exists
+    const parentDir = path.dirname(absPath);
+    if (!fs.existsSync(parentDir)) fs.mkdirSync(parentDir, { recursive: true });
+    fs.writeFileSync(absPath, content, 'utf8');
+    log('workspace.fileSaved', requested);
+    res.json({ ok: true, path: requested });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -11,6 +11,7 @@ import { loadSkills } from '../pages/skills.js';
 import { loadUsage } from '../pages/usage.js';
 import { loadUsersPage } from '../pages/users.js';
 import { loadMcp } from '../pages/mcp.js';
+import { loadWorkspace } from '../pages/workspace.js';
 
 function navigate(page, params = {}) {
   // Cleanup previous page resources
@@ -81,6 +82,9 @@ async function loadPage(page, params = {}) {
         break;
       case 'mcp':
         await loadMcp(container);
+        break;
+      case 'workspace':
+        await loadWorkspace(container);
         break;
       default:
         container.innerHTML = `<div class="empty" data-i18n="auto.pageNotFound">Page not found</div>`;

@@ -2,6 +2,8 @@
 
 A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Manage agents, chat, terminals, files, cron, token analytics, MCP servers, and swarm pipelines — behind a password gate.
 
+**Forked from [xaspx/hermes-control-interface](https://github.com/xaspx/hermes-control-interface)** with workspace enhancements — resizable file tree, editor, and chat panels.
+
 **Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js · Chart.js · better-sqlite3  
 **Version:** 3.6.0 · **License:** MIT
 
@@ -10,11 +12,11 @@ A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousRes
 ## Quick Start
 
 ```bash
-git clone https://github.com/xaspx/hermes-control-interface.git
+git clone https://github.com/deepatel70/hermes-control-interface.git
 cd hermes-control-interface
 cp .env.example .env     # set HERMES_CONTROL_PASSWORD + HERMES_CONTROL_SECRET
 npm install && npm run build
-node server.js            # → http://localhost:10274
+node server.js            # → https://localhost:10272
 ```
 
 See [docs/INSTALL.md](docs/INSTALL.md) for production setup, nginx, and systemd.
@@ -26,7 +28,8 @@ See [docs/INSTALL.md](docs/INSTALL.md) for production setup, nginx, and systemd.
 | Page | What |
 |------|------|
 | **Home** | System health, agent overview, gateway status, token usage |
-| **Chat** | Real-time streaming via gateway API, tool call cards, multi-profile |
+| **Chat** | Real-time streaming, tool call cards, multi-profile |
+| **Workspace** | Browse, edit files and chat with Hermes scoped to a project directory |
 | **Agents** | Profile CRUD, gateway lifecycle, per-agent dashboard/sessions/cron |
 | **Office** | 3-panel swarm monitor — agent health, kanban pipeline, live feed |
 | **Monitor** | Gateway logs, CPU/RAM metrics, live process view |
@@ -160,7 +163,7 @@ Full config: [docs/CONFIG.md](docs/CONFIG.md)
 ## Updating
 
 ```bash
-git pull origin main
+git pull upstream main
 npm install
 npm run build
 # Restart your HCI service (adjust service name):
@@ -186,7 +189,7 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for zero-downtime deploys.
 ---
 
 Built for the [Hermes Agent](https://github.com/NousResearch/hermes-agent) ecosystem.  
-[@bayendor](https://x.com/bayendor) · [GitHub](https://github.com/xaspx/hermes-control-interface)
+Fork by [deepatel70](https://github.com/deepatel70) · Upstream [@bayendor](https://x.com/bayendor) · [GitHub](https://github.com/xaspx/hermes-control-interface)
 
 ---
 
@@ -201,9 +204,10 @@ HCI is a **self-hosted web dashboard** for the Hermes AI agent stack. Manage age
 **Q: What can I manage with HCI?**
 
 | Page | Capabilities |
-|---|---|
+|---|---|---|
 | **Home** | System health, agent overview, gateway status, token usage |
 | **Chat** | Real-time streaming, tool call cards, multi-profile |
+| **Workspace** | Browse, edit files and chat with Hermes scoped to a project directory |
 | **Agents** | Profile CRUD, gateway lifecycle, dashboard/sessions/cron |
 | **Office** | 3-panel swarm monitor — agent health, kanban, live feed |
 | **Monitor** | Gateway logs, CPU/RAM metrics, live process view |
@@ -249,14 +253,14 @@ Full operational control plane for MCP servers:
 **Q: How do I install HCI?**
 
 ```bash
-git clone https://github.com/xaspx/hermes-control-interface.git
+git clone https://github.com/deepatel70/hermes-control-interface.git
 cd hermes-control-interface
 cp .env.example .env     # set HERMES_CONTROL_PASSWORD + HERMES_CONTROL_SECRET
 npm install && npm run build
-node server.js            # → http://localhost:10274
+node server.js            # → https://localhost:10272
 ```
 
-See [docs/INSTALL.md](docs/INSTALL.md) for production setup.
+See [docs/INSTALL.md](docs/INSTALL.md) for full setup.
 
 **Q: What are the requirements?**
 
@@ -267,7 +271,7 @@ See [docs/INSTALL.md](docs/INSTALL.md) for production setup.
 **Q: How do I update HCI?**
 
 ```bash
-git pull origin main
+git pull upstream main
 npm install
 npm run build
 # Restart your HCI service (adjust service name):
@@ -381,7 +385,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
 | Resource | Link |
 |---|---|
-| **GitHub Issues** | [github.com/xaspx/hermes-control-interface/issues](https://github.com/xaspx/hermes-control-interface/issues) |
+| **GitHub Issues** | [github.com/deepatel70/hermes-control-interface/issues](https://github.com/deepatel70/hermes-control-interface/issues) |
 | **Twitter** | [@bayendor](https://x.com/bayendor) |
 | **Hermes Agent** | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) |
 

@@ -28,6 +28,7 @@ import { loadMcp, showAddMcpModal, mcpAction, mcpSwitchTab, showMcpTestModal,
   showEditMcpConfigModal, submitAddMcp, submitMcpTest, submitMcpConfigEdit,
   selectMcpServer, toggleMcpAddType, renderServerListFiltered,
   toggleMcpLogs, clearMcpLogs } from './pages/mcp.js';
+import { loadWorkspace } from './pages/workspace.js';
 
 // ========================================================
 // WINDOW BRIDGE — all module exports exposed globally
