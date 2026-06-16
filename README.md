@@ -2,21 +2,19 @@
 
 A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Manage agents, chat, terminals, files, cron, token analytics, MCP servers, and swarm pipelines — behind a password gate.
 
-**Forked from [xaspx/hermes-control-interface](https://github.com/xaspx/hermes-control-interface)** with workspace enhancements — resizable file tree, editor, and chat panels.
-
 **Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js · Chart.js · better-sqlite3  
-**Version:** 3.6.0 · **License:** MIT
+**Version:** 3.6.1 · **License:** MIT
 
 ---
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/deepatel70/hermes-control-interface.git
+git clone https://github.com/xaspx/hermes-control-interface.git
 cd hermes-control-interface
 cp .env.example .env     # set HERMES_CONTROL_PASSWORD + HERMES_CONTROL_SECRET
 npm install && npm run build
-node server.js            # → https://localhost:10272
+node server.js            # → http://localhost:10274
 ```
 
 See [docs/INSTALL.md](docs/INSTALL.md) for production setup, nginx, and systemd.
@@ -189,7 +187,7 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for zero-downtime deploys.
 ---
 
 Built for the [Hermes Agent](https://github.com/NousResearch/hermes-agent) ecosystem.  
-Fork by [deepatel70](https://github.com/deepatel70) · Upstream [@bayendor](https://x.com/bayendor) · [GitHub](https://github.com/xaspx/hermes-control-interface)
+Upstream [@bayendor](https://x.com/bayendor) · [GitHub](https://github.com/xaspx/hermes-control-interface)
 
 ---
 
@@ -253,11 +251,11 @@ Full operational control plane for MCP servers:
 **Q: How do I install HCI?**
 
 ```bash
-git clone https://github.com/deepatel70/hermes-control-interface.git
+git clone https://github.com/xaspx/hermes-control-interface.git
 cd hermes-control-interface
 cp .env.example .env     # set HERMES_CONTROL_PASSWORD + HERMES_CONTROL_SECRET
 npm install && npm run build
-node server.js            # → https://localhost:10272
+node server.js            # → http://localhost:10274
 ```
 
 See [docs/INSTALL.md](docs/INSTALL.md) for full setup.
@@ -289,7 +287,7 @@ systemctl restart hci-staging
 | **Terminal** | xterm.js |
 | **Charts** | Chart.js |
 | **Database** | better-sqlite3 |
-| **Version** | 3.6.0 |
+| **Version** | 3.6.1 |
 
 ### Security
 
@@ -385,7 +383,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
 | Resource | Link |
 |---|---|
-| **GitHub Issues** | [github.com/deepatel70/hermes-control-interface/issues](https://github.com/deepatel70/hermes-control-interface/issues) |
+| **GitHub Issues** | [github.com/xaspx/hermes-control-interface/issues](https://github.com/xaspx/hermes-control-interface/issues) |
 | **Twitter** | [@bayendor](https://x.com/bayendor) |
 | **Hermes Agent** | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) |
 
