@@ -2987,6 +2987,12 @@ app.get('/api/workspace/file', requireAuth, (req, res) => {
     if (!fs.existsSync(absPath)) return res.status(404).json({ error: 'file not found' });
     if (fs.statSync(absPath).isDirectory()) return res.status(400).json({ error: 'is a directory' });
 
+    const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+    const fileSize = fs.statSync(absPath).size;
+    if (fileSize > MAX_FILE_SIZE) {
+      return res.status(413).json({ error: 'file too large (max 50 MB)' });
+    }
+
     const content = fs.readFileSync(absPath, 'utf8');
     res.json({ ok: true, path: requested, content });
   } catch (e) {

@@ -229,11 +229,8 @@ window.openWsFile = async function(filePath) {
   }
 
   try {
-    const res = await fetch(`/api/workspace/file?path=${encodeURIComponent(filePath)}`, {
-      headers: { 'X-CSRF-Token': window.__csrfToken || '' }
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) {
+    const data = await api(`/api/workspace/file?path=${encodeURIComponent(filePath)}`);
+    if (!data.ok) {
       showToast(data.error || 'Failed to load file', 'error');
       return;
     }
@@ -260,12 +257,10 @@ window.saveWsFile = async function() {
   if (!_currentFile) return;
   const content = document.getElementById('workspace-editor-textarea').value;
   try {
-    const res = await fetch('/api/workspace/file', {
+    const data = await api('/api/workspace/file', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.__csrfToken || '' },
       body: JSON.stringify({ path: _currentFile.relPath, content })
     });
-    const data = await res.json();
     if (data.ok) {
       _currentFile.originalContent = content;
       _currentFile.content = content;
