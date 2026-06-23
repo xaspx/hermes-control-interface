@@ -937,6 +937,17 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ error: 'authentication required' });
 }
 
+function requireProfileAccess(req, res, next) {
+  const profile = req.params.profile || req.body?.profile;
+  if (!profile) return next();
+  const currentUser = getCurrentUser(req);
+  const user = currentUser ? findUser(currentUser.username) : null;
+  if (!canAccessProfile(user, profile)) {
+    return res.status(403).json({ error: 'access denied to this profile' });
+  }
+  return next();
+}
+
 function requireCsrf(req, res, next) {
   if (!isAuthed(req)) return res.status(401).json({ error: 'authentication required' });
   const headerToken = req.headers['x-csrf-token'];
@@ -1840,7 +1851,7 @@ app.get('/api/session', requireAuth, (req, res) => {
 const {
   isFirstRun, findUser, createUser, deleteUser,
   verifyUserPassword, changePassword, resetUserPassword, sanitizeUsername, listUsers,
-  updateUserPermissions, PERMISSIONS, PRESET_PERMISSIONS, resolvePermissions,
+  updateUserPermissions, updateUserProfiles, canAccessProfile, PERMISSIONS, PRESET_PERMISSIONS, resolvePermissions,
   audit, getAuditLog,
   loadNotifications, addNotification, dismissNotification, clearNotifications,
 } = require('./auth');
@@ -2388,8 +2399,10 @@ getProfiles.cache = { at: 0, data: [] };
 
 app.get('/api/profiles', requireAuth, async (req, res) => {
   const profiles = await getProfiles();
-  console.log('[DEBUG /api/profiles] returning:', JSON.stringify(profiles));
-  res.json({ ok: true, profiles });
+  const user = findUser(req.session?.username);
+  const filtered = profiles.filter(p => canAccessProfile(user, p.name || p));
+  console.log('[DEBUG /api/profiles] returning:', JSON.stringify(filtered));
+  res.json({ ok: true, profiles: filtered });
 });
 
 app.post('/api/profiles/use', requireRole('admin'), requireCsrf, async (req, res) => {
@@ -2420,7 +2433,7 @@ function getGatewayServiceName(profile) {
   };
 }
 
-app.get('/api/gateway/:profile', requireAuth, async (req, res) => {
+app.get('/api/gateway/:profile', requireAuth, requireProfileAccess, async (req, res) => {
   const profile = sanitizeProfileName(req.params.profile);
   if (!profile) return res.status(400).json({ error: 'invalid profile name' });
   const svcs = getGatewayServiceName(profile);
@@ -2474,7 +2487,7 @@ app.get('/api/gateway/:profile', requireAuth, async (req, res) => {
 });
 
 // Gateway connections (parse from hermes status --all)
-app.get('/api/gateway/:profile/connections', requireAuth, async (req, res) => {
+app.get('/api/gateway/:profile/connections', requireAuth, requireProfileAccess, async (req, res) => {
   const profile = sanitizeProfileName(req.params.profile);
   if (!profile) return res.status(400).json({ error: 'invalid profile name' });
   try {
@@ -2571,7 +2584,7 @@ app.post('/api/gateway/:profile/:action', requireAuth, requireRole('admin'), req
   }
 });
 
-app.get('/api/gateway/:profile/logs', requireAuth, async (req, res) => {
+app.get('/api/gateway/:profile/logs', requireAuth, requireProfileAccess, async (req, res) => {
   const profile = sanitizeProfileName(req.params.profile);
   if (!profile) return res.status(400).json({ error: 'invalid profile name' });
   const svcs = getGatewayServiceName(profile);
@@ -2597,7 +2610,7 @@ app.get('/api/gateway/:profile/logs', requireAuth, async (req, res) => {
 });
 
 // Gateway health check for a specific profile
-app.get('/api/gateway/:profile/health', requireAuth, async (req, res) => {
+app.get('/api/gateway/:profile/health', requireAuth, requireProfileAccess, async (req, res) => {
   try {
     const profile = sanitizeProfileName(req.params.profile) || 'default';
     const port = gatewayPorts[profile];
@@ -3383,7 +3396,10 @@ app.get('/api/office/agent-states', requireAuth, async (req, res) => {
       agents.push(agent);
     }
 
-    res.json({ ok: true, agents, timestamp: Date.now() });
+    const currentUser = getCurrentUser(req);
+    const user = currentUser ? findUser(currentUser.username) : null;
+    const filteredAgents = agents.filter(a => canAccessProfile(user, a.name || a.profile));
+    res.json({ ok: true, agents: filteredAgents, timestamp: Date.now() });
   } catch (e) {
     res.json({ ok: false, error: e.message });
   }
@@ -4172,7 +4188,7 @@ app.get('/api/skills', requireAuth, async (req, res) => {
 });
 
 // Config show
-app.get('/api/config/:profile', requireAuth, async (req, res) => {
+app.get('/api/config/:profile', requireAuth, requireProfileAccess, async (req, res) => {
   try {
     const profile = sanitizeProfileName(req.params.profile);
     if (!profile) return res.status(400).json({ ok: false, error: 'invalid profile name' });
@@ -4331,7 +4347,7 @@ function getKeyMeta(name) {
 }
 
 // Keys (secrets) — list keys from .env with category metadata
-app.get('/api/keys/:profile', requireAuth, async (req, res) => {
+app.get('/api/keys/:profile', requireAuth, requireProfileAccess, async (req, res) => {
   try {
     const profile = sanitizeProfileName(req.params.profile);
     if (!profile) return res.status(400).json({ ok: false, error: 'invalid profile name' });
