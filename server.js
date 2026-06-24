@@ -143,12 +143,12 @@ const PROJECTS_ROOT    = cfg.projectsRoot;
 const HCI_USER = os.userInfo().username;
 const HCI_HOST = os.hostname();
 const HCI_IDENTITY = `${HCI_USER}@${HCI_HOST}`;
-const IS_ROOT = process.getuid() === 0;
+const IS_ROOT = process.getuid ? process.getuid() === 0 : false;
 // systemctl/journalctl: add --user flag for non-root
 const SYSTEMD_USER_FLAG = IS_ROOT ? '' : '--user';
 // XDG_RUNTIME_DIR: required for systemctl --user to work
 // Auto-detect if not set (e.g. running via sudo -u without login session)
-if (!IS_ROOT && !process.env.XDG_RUNTIME_DIR) {
+if (!IS_ROOT && !process.env.XDG_RUNTIME_DIR && process.getuid) {
   const uid = process.getuid();
   const runtimeDir = `/run/user/${uid}`;
   if (fs.existsSync(runtimeDir)) {
