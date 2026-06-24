@@ -58,15 +58,10 @@ function showApp() {
 
   // Hide nav items based on permissions (after DOM is visible)
   setTimeout(() => {
-    const navPerms = { 'files': 'files.read', 'maintenance': 'admin' };
-    document.querySelectorAll('.nav-link[data-page]').forEach(link => {
-      const page = link.getAttribute('data-page');
-      const req = navPerms[page];
-      if (req) {
-        const show = req === 'admin' ? state.user?.role === 'admin' : hasPerm(req);
-        link.style.display = show ? '' : 'none';
-      }
-    });
+    const navFiles = document.getElementById('nav-files');
+    const navMaint = document.getElementById('nav-maintenance');
+    if (navFiles && !hasPerm('files.read')) navFiles.style.display = 'none';
+    if (navMaint && state.user?.role !== 'admin') navMaint.style.display = 'none';
   }, 100);
 
   // ── Phase 3: Session Restore ──
