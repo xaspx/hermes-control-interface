@@ -53,26 +53,21 @@ function showApp() {
   document.getElementById('login-overlay').classList.add('hidden');
   document.getElementById('app').style.display = 'block';
   updateUserMenu();
-
-  // Hide nav items based on permissions
-  const navPerms = {
-    'files': 'files.read',
-    'maintenance': 'admin',
-  };
-  document.querySelectorAll('.nav-link[data-page]').forEach(link => {
-    const page = link.getAttribute('data-page');
-    const requiredPerm = navPerms[page];
-    if (requiredPerm) {
-      if (requiredPerm === 'admin') {
-        link.style.display = (state.user?.role === 'admin') ? '' : 'none';
-      } else {
-        link.style.display = hasPerm(requiredPerm) ? '' : 'none';
-      }
-    }
-  });
-
   navigate(state.page);
   startNotifPolling();
+
+  // Hide nav items based on permissions (after DOM is visible)
+  setTimeout(() => {
+    const navPerms = { 'files': 'files.read', 'maintenance': 'admin' };
+    document.querySelectorAll('.nav-link[data-page]').forEach(link => {
+      const page = link.getAttribute('data-page');
+      const req = navPerms[page];
+      if (req) {
+        const show = req === 'admin' ? state.user?.role === 'admin' : hasPerm(req);
+        link.style.display = show ? '' : 'none';
+      }
+    });
+  }, 100);
 
   // ── Phase 3: Session Restore ──
   // Restore last session from localStorage after sidebar loads
