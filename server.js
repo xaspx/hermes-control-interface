@@ -2400,7 +2400,8 @@ getProfiles.cache = { at: 0, data: [] };
 
 app.get('/api/profiles', requireAuth, async (req, res) => {
   const profiles = await getProfiles();
-  const user = findUser(req.session?.username);
+  const currentUser = getCurrentUser(req);
+  const user = currentUser ? findUser(currentUser.username) : null;
   const filtered = profiles.filter(p => canAccessProfile(user, p.name || p));
   console.log('[DEBUG /api/profiles] returning:', JSON.stringify(filtered));
   res.json({ ok: true, profiles: filtered });
