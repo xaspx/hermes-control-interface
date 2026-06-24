@@ -5,7 +5,6 @@ import { loadChatSession } from '../chat/core.js';
 import { setupWsChatHandlers, showChatWarning } from '../chat/gateway.js';
 import { startNotifPolling } from '../components/notifications.js';
 import { navigate } from './navigation.js';
-import { hasPerm } from './permissions.js';
 
 async function checkAuth() {
   try {
