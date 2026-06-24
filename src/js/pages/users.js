@@ -223,6 +223,13 @@ async function showCreateUser() {
             </div>
           </div>
         </div>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:11px;color:var(--fg-muted);display:block;margin-bottom:6px;">Agent Access (allowed profiles)</label>
+          <div style="font-size:10px;color:var(--fg-subtle);margin-bottom:6px;">Uncheck agents this user should NOT see. Admin role always sees all.</div>
+          <div id="profile-access-list" style="display:grid;grid-template-columns:1fr 1fr;gap:2px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius);padding:8px;background:var(--bg-input);">
+            <span style="color:var(--fg-muted);font-size:10px;">Loading profiles...</span>
+          </div>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()" data-i18n="auto.cancel">Cancel</button>
           <button type="submit" class="btn btn-primary" data-i18n="auto.createUser">Create User</button>
@@ -231,6 +238,22 @@ async function showCreateUser() {
     </div>
   `;
   document.body.appendChild(overlay);
+
+  // Load available profiles for the allowed_profiles selector
+  (async () => {
+    try {
+      const profilesRes = await api('/api/profiles');
+      const profiles = (profilesRes.profiles || []).map(p => p.name || p);
+      const container = overlay.querySelector('#profile-access-list');
+      if (container && profiles.length) {
+        container.innerHTML = profiles.map(name => `
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:2px 4px;border-radius:3px;" onmouseover="this.style.background='var(--bg-panel-hover)'" onmouseout="this.style.background='transparent'">
+            <input type="checkbox" name="allowed_profile" value="${name}" checked /> ${name}
+          </label>
+        `).join('');
+      }
+    } catch(_) {}
+  })();
 
   // Apply preset for create user modal
   const form = overlay.querySelector('#create-user-form');
@@ -286,15 +309,18 @@ async function showCreateUser() {
       const checked = overlay.querySelectorAll('input[name="perm"]:checked');
       checked.forEach(cb => { perms[cb.value] = true; });
     }
-    createUser(username, password, role, perms);
+    // Collect allowed profiles
+    const profileChecked = overlay.querySelectorAll('input[name="allowed_profile"]:checked');
+    const allowed_profiles = role === 'admin' ? ['*'] : Array.from(profileChecked).map(cb => cb.value);
+    createUser(username, password, role, perms, allowed_profiles);
     overlay.remove();
   });
 }
 
-async function createUser(username, password, role, permissions) {
+async function createUser(username, password, role, permissions, allowed_profiles) {
   try {
     const csrfToken = state.csrfToken || '';
-    const body = { username, password, role };
+    const body = { username, password, role, allowed_profiles };
     if (role === 'custom' && permissions) body.permissions = permissions;
     const res = await api('/api/users', {
       method: 'POST',

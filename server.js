@@ -2029,7 +2029,7 @@ app.get('/api/users', requireRole('admin'), (req, res) => {
 
 // Create user
 app.post('/api/users', requireRole('admin'), requireCsrf, (req, res) => {
-  const { username, password, role, permissions } = req.body || {};
+  const { username, password, role, permissions, allowed_profiles } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ ok: false, error: 'Username and password required' });
   }
@@ -2040,9 +2040,10 @@ app.post('/api/users', requireRole('admin'), requireCsrf, (req, res) => {
     return res.status(400).json({ ok: false, error: 'Password must be at least 8 characters' });
   }
   const userRole = ['admin', 'viewer', 'custom'].includes(role) ? role : 'viewer';
-  const result = createUser(username, password, userRole, userRole === 'custom' ? permissions : null);
+  const profiles = userRole === 'admin' ? ['*'] : (Array.isArray(allowed_profiles) ? allowed_profiles : ['*']);
+  const result = createUser(username, password, userRole, profiles);
   if (!result.ok) return res.status(400).json(result);
-  addNotification('success', `User created: ${username} (${userRole})`);
+  addNotification('success', `User created: ${username} (${userRole}) profiles=${JSON.stringify(profiles)}`);
   res.json({ ok: true });
 });
 
