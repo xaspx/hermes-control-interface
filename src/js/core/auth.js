@@ -1,4 +1,5 @@
 import { state, t, wsClient } from './state.js';;
+import { hasPerm } from './permissions.js';
 import { updateGatewayBadge, updateWsConnectionUI } from '../chat/cli.js';
 import { loadChatSession } from '../chat/core.js';
 import { setupWsChatHandlers, showChatWarning } from '../chat/gateway.js';
@@ -52,6 +53,24 @@ function showApp() {
   document.getElementById('login-overlay').classList.add('hidden');
   document.getElementById('app').style.display = 'block';
   updateUserMenu();
+
+  // Hide nav items based on permissions
+  const navPerms = {
+    'files': 'files.read',
+    'maintenance': 'admin',
+  };
+  document.querySelectorAll('.nav-link[data-page]').forEach(link => {
+    const page = link.getAttribute('data-page');
+    const requiredPerm = navPerms[page];
+    if (requiredPerm) {
+      if (requiredPerm === 'admin') {
+        link.style.display = (state.user?.role === 'admin') ? '' : 'none';
+      } else {
+        link.style.display = hasPerm(requiredPerm) ? '' : 'none';
+      }
+    }
+  });
+
   navigate(state.page);
   startNotifPolling();
 
