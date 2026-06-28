@@ -47,7 +47,7 @@ function findUser(username) {
   return data.users.find(u => u.username === username) || null;
 }
 
-function createUser(username, password, role = 'viewer') {
+function createUser(username, password, role = 'viewer', allowed_profiles = ['*']) {
   const clean = sanitizeUsername(username);
   if (!clean) return { ok: false, error: 'Invalid username (2-32 chars, alphanumeric/_.- only)' };
   const data = loadUsers();
@@ -59,12 +59,29 @@ function createUser(username, password, role = 'viewer') {
     username: clean,
     password_hash: hash,
     role,
+    allowed_profiles: role === 'admin' ? ['*'] : allowed_profiles,
     created_at: new Date().toISOString(),
     last_login: null,
   });
   saveUsers(data);
-  audit('system', 'admin', 'USER_CREATE', `created user ${clean} (${role})`);
+  audit('system', 'admin', 'USER_CREATE', `created user ${clean} (${role}) profiles=${JSON.stringify(allowed_profiles)}`);
   return { ok: true };
+}
+
+function updateUserProfiles(username, allowed_profiles, currentUser) {
+  const data = loadUsers();
+  const user = data.users.find(u => u.username === username);
+  if (!user) return { ok: false, error: 'User not found' };
+  user.allowed_profiles = allowed_profiles;
+  saveUsers(data);
+  audit(currentUser, 'admin', 'USER_UPDATE_PROFILES', `${username} profiles=${JSON.stringify(allowed_profiles)}`);
+  return { ok: true };
+}
+
+function canAccessProfile(user, profileName) {
+  if (!user || !user.allowed_profiles) return true; // legacy users get full access
+  if (user.allowed_profiles.includes('*')) return true;
+  return user.allowed_profiles.includes(profileName);
 }
 
 function deleteUser(username, currentUser) {
@@ -275,6 +292,8 @@ module.exports = {
   sanitizeUsername,
   listUsers,
   updateUserPermissions,
+  updateUserProfiles,
+  canAccessProfile,
   PERMISSIONS,
   PRESET_PERMISSIONS,
   resolvePermissions,

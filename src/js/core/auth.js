@@ -1,10 +1,10 @@
 import { state, t, wsClient } from './state.js';;
+import { hasPerm } from './permissions.js';
 import { updateGatewayBadge, updateWsConnectionUI } from '../chat/cli.js';
 import { loadChatSession } from '../chat/core.js';
 import { setupWsChatHandlers, showChatWarning } from '../chat/gateway.js';
 import { startNotifPolling } from '../components/notifications.js';
 import { navigate } from './navigation.js';
-import { hasPerm } from './permissions.js';
 
 async function checkAuth() {
   try {
@@ -54,6 +54,14 @@ function showApp() {
   updateUserMenu();
   navigate(state.page);
   startNotifPolling();
+
+  // Hide nav items based on permissions (after DOM is visible)
+  setTimeout(() => {
+    const navFiles = document.getElementById('nav-files');
+    const navMaint = document.getElementById('nav-maintenance');
+    if (navFiles && !hasPerm('files.read')) navFiles.style.display = 'none';
+    if (navMaint && state.user?.role !== 'admin') navMaint.style.display = 'none';
+  }, 100);
 
   // ── Phase 3: Session Restore ──
   // Restore last session from localStorage after sidebar loads

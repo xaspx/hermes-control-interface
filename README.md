@@ -90,6 +90,24 @@ Full operational control plane — list, start, stop, restart MCP servers. Live 
 - Rate limiting (global + chat), WebSocket RBAC
 - Path traversal prevention, XSS protection
 - 20 permissions across 3 roles (admin, viewer, custom)
+- **Profile-based access isolation** — restrict users to specific agent profiles
+
+### Profile-Based Access Control
+
+Multi-agent teams can restrict which profiles (agents) each user can see and manage:
+
+```javascript
+// User creation with profile restriction
+createUser('cx-team', 'password', 'custom', ['jorah']);     // only sees Jorah
+createUser('influencer-team', 'password', 'custom', ['varys']); // only sees Varys  
+createUser('admin', 'password', 'admin', ['*']);             // sees all agents
+```
+
+- `allowed_profiles` field on each user (`["*"]` = full access, `["jorah", "varys"]` = specific agents)
+- Filters `/api/profiles`, `/api/office/agent-states`, and all `:profile` endpoints
+- `requireProfileAccess` middleware on gateway, config, and keys routes
+- Profile selection UI in the Create User form (checkboxes for available agents)
+- Nav tabs hidden based on user permissions (Files, Maintenance = admin only)
 
 ### PWA
 
