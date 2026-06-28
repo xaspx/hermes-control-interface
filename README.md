@@ -205,7 +205,7 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for zero-downtime deploys.
 ---
 
 Built for the [Hermes Agent](https://github.com/NousResearch/hermes-agent) ecosystem.  
-Upstream [@bayendor](https://x.com/bayendor) · [GitHub](https://github.com/xaspx/hermes-control-interface)
+[GitHub](https://github.com/xaspx/hermes-control-interface)
 
 ---
 
@@ -399,11 +399,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
 ### Community & Support
 
-| Resource | Link |
-|---|---|
-| **GitHub Issues** | [github.com/xaspx/hermes-control-interface/issues](https://github.com/xaspx/hermes-control-interface/issues) |
-| **Twitter** | [@bayendor](https://x.com/bayendor) |
-| **Hermes Agent** | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) |
+|| Resource | Link |
+|---|---|---|
+|| **GitHub Issues** | [github.com/xaspx/hermes-control-interface/issues](https://github.com/xaspx/hermes-control-interface/issues) |
+|| **GitHub** | [xaspx/hermes-control-interface](https://github.com/xaspx/hermes-control-interface) |
+|| **Hermes Agent** | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) |
 
 ### License
 

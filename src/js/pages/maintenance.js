@@ -91,7 +91,6 @@ async function loadMaintenance(container) {
       <div class="card">
         <div class="card-title" data-i18n="auto.hciInfo">HCI Info</div>
         <div class="stat-row"><span class="stat-label">GitHub</span><span class="stat-value"><a href="https://github.com/xaspx/hermes-control-interface" target="_blank" style="color:var(--accent);text-decoration:none;">🔗 xaspx/hermes-control-interface</a></span></div>
-        <div class="stat-row"><span class="stat-label">Twitter</span><span class="stat-value"><a href="https://x.com/bayendor" target="_blank" style="color:var(--accent);text-decoration:none;">@bayendor</a></span></div>
       </div>
     </div>
   `;
