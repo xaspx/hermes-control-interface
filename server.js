@@ -128,6 +128,7 @@ function execHermes(args, timeout = 30000, stdin = null) {
 
 // ── Direct data access (no hermes CLI subprocess) ──
 const { getHermesVersion, getAgentCount, getSessionCount } = require('./lib/hermes');
+const { buildTelemetrySnapshot } = require('./lib/multica-telemetry');
 
 // ── Load HCI config (hci.config.yaml + env overrides) ──
 const cfg = getConfig();
@@ -3595,6 +3596,37 @@ app.get('/api/office/kanban', requireAuth, (req, res) => {
     });
   } catch (e) {
     res.json({ ok: false, error: e.message });
+  }
+});
+
+// ── Office v5: Multica Issue Execution Telemetry ────────────────────────────
+// JOSH-42 — Multica-to-Hermes execution-observability bridge.
+//
+// Multica stays canonical for issue ownership/status/comments/swarm structure;
+// this endpoint is a read-only telemetry mirror over the authenticated
+// `multica` CLI's JSON contract (see lib/multica-cli.js, lib/multica-bridge.js,
+// docs/MULTICA_BRIDGE.md). No direct state.db integration; no secrets exposed.
+let _multicaTelemetryCache = { at: 0, payload: null };
+const MULTICA_TELEMETRY_CACHE_MS = 5000; // avoid hammering the CLI on 2s UI polls
+
+app.get('/api/office/multica-issues', requireAuth, async (req, res) => {
+  try {
+    const now = Date.now();
+    const forceRefresh = req.query.refresh === '1';
+    if (!forceRefresh && _multicaTelemetryCache.payload && (now - _multicaTelemetryCache.at) < MULTICA_TELEMETRY_CACHE_MS) {
+      return res.json(_multicaTelemetryCache.payload);
+    }
+
+    const workspaceId = process.env.MULTICA_WORKSPACE_ID || null;
+    const appUrl = process.env.MULTICA_APP_URL || 'https://multica.ai';
+    const snapshot = await buildTelemetrySnapshot({ workspaceId, appUrl, nowMs: now });
+
+    const payload = { ok: snapshot.ok, ...snapshot };
+    _multicaTelemetryCache = { at: now, payload };
+    res.json(payload);
+  } catch (e) {
+    // Fail visibly — never fall back to a stale-looking "healthy" response.
+    res.json({ ok: false, error: e.message, issues: [], warnings: [e.message] });
   }
 });
 
