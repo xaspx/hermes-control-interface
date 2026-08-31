@@ -347,7 +347,7 @@ function resolveCorsOrigins(req) {
 // Scans ~/.hermes/config.yaml (default) + ~/.hermes/profiles/*/config.yaml
 function discoverGatewayPorts() {
   const ports = {};
-  const baseHermesHome = path.join(os.homedir(), '.hermes');
+  const baseHermesHome = HERMES_HOME; // was hardcoded os.homedir()+'.hermes' — broke under Docker where $HOME != the real state root
   try {
     // Default profile: ~/.hermes/config.yaml (base, not HERMES_HOME which may be profile-specific)
     const defaultConf = fs.readFileSync(path.join(baseHermesHome, 'config.yaml'), 'utf8');
@@ -424,7 +424,7 @@ async function probeGatewayHealth(profile) {
 
 // Read default model from profile config.yaml
 function getDefaultModel(profile) {
-  const baseHermesHome = path.join(os.homedir(), '.hermes');
+  const baseHermesHome = HERMES_HOME; // was hardcoded os.homedir()+'.hermes' — see discoverGatewayPorts() above
   try {
     const configPath = profile === 'default'
       ? path.join(baseHermesHome, 'config.yaml')
@@ -5698,7 +5698,7 @@ app.get('/api/setup/check', requireAuth, async (req, res) => {
   });
 
   // 4. Check hermes config.yaml
-  const configPath = path.join(os.homedir(), '.hermes', 'config.yaml');
+  const configPath = path.join(HERMES_HOME, 'config.yaml'); // was os.homedir()+'.hermes' — same bug as discoverGatewayPorts()
   try {
     const raw = fs.readFileSync(configPath, 'utf8');
     yaml.load(raw);
