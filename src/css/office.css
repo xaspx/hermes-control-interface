@@ -1252,3 +1252,108 @@
   white-space: pre-wrap;
   font-family: monospace;
 }
+
+/* ── Multica Issue Execution Telemetry panel (JOSH-42) ──────────────── */
+.mx-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.mx-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+.mx-generated-at {
+  font-weight: 400;
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+.mx-loading, .mx-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.mx-error {
+  padding: 16px;
+  margin: 12px;
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+}
+.mx-error-title { font-weight: 600; color: var(--red); font-size: 12px; margin-bottom: 4px; }
+.mx-error-detail { font-size: 11px; color: var(--fg-muted); font-family: monospace; }
+.mx-warnings {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.mx-table-wrap { overflow: auto; flex: 1; min-height: 0; }
+.mx-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.mx-table thead th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  z-index: 1;
+}
+.mx-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.mx-row--stale { background: color-mix(in srgb, var(--red) 6%, transparent); }
+.mx-issue-cell { max-width: 240px; }
+.mx-issue-id { font-weight: 600; color: var(--fg); }
+.mx-issue-title { color: var(--fg-muted); font-size: 10px; }
+.mx-issue-status { text-transform: uppercase; font-size: 10px; color: var(--fg-muted); }
+.mx-telemetry-error { color: var(--red); font-size: 10px; margin-top: 2px; }
+.mx-state-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mx-run-id { font-family: monospace; color: var(--fg); }
+.mx-run-status { color: var(--fg-muted); font-size: 10px; }
+.mx-run-none, .mx-swarm-none { color: var(--fg-subtle); }
+.mx-runtime-name { color: var(--fg-muted); font-size: 10px; }
+.mx-swarm-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.mx-link { color: var(--blue); text-decoration: none; font-size: 10px; }
+.mx-link:hover { text-decoration: underline; }
+
+.mx--muted { color: var(--fg-muted); background: color-mix(in srgb, var(--fg-muted) 12%, transparent); }
+.mx--blue  { color: var(--blue);  background: color-mix(in srgb, var(--blue) 15%, transparent); }
+.mx--green { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
+.mx--amber { color: var(--amber); background: color-mix(in srgb, var(--amber) 15%, transparent); }
+.mx--pink  { color: var(--pink);  background: color-mix(in srgb, var(--pink) 15%, transparent); }
+.mx--red   { color: var(--red);   background: color-mix(in srgb, var(--red) 15%, transparent); }
