@@ -41,6 +41,7 @@ const PROVIDER_MAP = {
 const CUSTOM_PRICING = {
   'minimax-m2':   { input_mtok: 0.30, output_mtok: 1.20, cache_read_mtok: 0.03 },
   'minimax-m2.7': { input_mtok: 0.30, output_mtok: 1.20, cache_read_mtok: 0.03 },
+  'minimax-m3':   { input_mtok: 0.60, output_mtok: 2.40, cache_read_mtok: 0.12 },
 };
 
 // Calculate cost in USD from token counts
