@@ -15,6 +15,7 @@
     "setup": "bash install.sh",
     "test": "node --test test/*.test.js",
     "test:e2e": "npx playwright test",
+    "test:qa": "playwright test -c playwright.config.mts",
     "reset-password": "node scripts/reset-password.js",
     "postinstall": "npm rebuild better-sqlite3",
     "changelog": "bash scripts/generate-changelog.sh"
@@ -40,5 +41,8 @@
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "vite": "^8.0.14"
+  },
+  "overrides": {
+    "qs": "^6.16.2"
   }
 }

@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const HERMES_HOME = path.join(os.homedir(), '.hermes');
+const HERMES_HOME = process.env.HERMES_HOME || path.join(os.homedir(), '.hermes');
 const USERS_FILE = path.join(HERMES_HOME, 'hci-users.json');
 const AUDIT_FILE = path.join(HERMES_HOME, 'hci-audit.log');
 const SALT_ROUNDS = 10;
