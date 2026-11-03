@@ -181,12 +181,7 @@ npm run test:qa   # Playwright route QA (qa/) — set QA_BASE_URL to a running i
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
 ├── dist/                   # Production assets built by Vite
-│   ├── assets/
-│   │   ├── favicon-Bkag5KeL.svg
-│   │   ├── hermes-agent-bg-DhFabiO9.jpg
-│   │   ├── hermes-icon-BhPDiZ8G.svg
-│   │   ├── index-C33hUJXJ.css
-│   │   └── index-DXC1lv8V.js
+│   ├── assets/             # Hashed bundles (index-*.js/css, favicon, images)
 │   ├── i18n/
 │   │   ├── en.json
 │   │   └── ja.json
