@@ -1,412 +1,248 @@
 # Hermes Control Interface
 
-A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Manage agents, chat, terminals, files, cron, token analytics, MCP servers, and swarm pipelines — behind a password gate.
+A self‑hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Manage terminals, files, sessions, cron jobs, token analytics, multi‑agent gateways, and team access — all behind a password gate.
 
-**Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js · Chart.js · better-sqlite3  
-**Version:** 3.6.1 · **License:** MIT
+**Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js  
+**Version:** 3.5.1  
 
----
+---  
 
-## Quick Start
+## Introduction
+
+Hermes Control Interface (HCI) is the web UI that lets you operate a Hermes AI agent deployment from a browser. It provides:
+
+* Real‑time chat via the Gateway API with tool‑call cards and session resume
+* Full RBAC (28 permissions, 3 built‑in roles) and multi‑user management
+* Multi‑agent gateway control, log streaming and systemd service integration
+* Token‑usage analytics, health monitoring and diagnostics
+* Secure, password‑protected access with bcrypt hashing, CSRF protection and rate limiting  
+* File explorer, in‑browser terminal, skill marketplace and maintenance tools  
+
+The UI is built with vanilla JavaScript, Vite for bundling, and an Express‑powered backend that also hosts the WebSocket and PTY services required for the terminal.
+
+---  
+
+## Features  
+
+### 🔐 Authentication & Security  
+* Single‑password login (configurable via `HERMES_CONTROL_PASSWORD`)  
+* BCrypt password hashing (cost 10) and optional multi‑user support  
+* CSRF tokens on all mutating endpoints  
+* Secure cookies (HTTPS‑only when applicable)  
+* Rate limiting (5 failed logins/15 min per IP, 30 terminal commands/min)  
+* Comprehensive XSS, injection and CORS hardening (see `docs/SECURITY_AUDIT.md`)  
+
+### 🏠 Home Dashboard  
+* System health overview (CPU, RAM, disk, uptime)  
+* Agent and gateway status badges  
+* 7‑day token‑usage summary with cost estimation  
+
+### 🤖 Agents – Multi‑Agent Management  
+* List, create, clone, delete and set default Hermes profiles  
+* Start/stop/restart gateways per profile with live log viewer  
+
+### 💬 Chat – Revamped Interface  
+* Real‑time streaming via Gateway API  
+* Collapsible tool‑call cards with JSON viewer  
+* Session sidebar for resume, rename, delete and export  
+* Multi‑profile support and auto‑fallback to CLI  
+
+### 📊 Usage & Analytics  
+* Token & cost breakdown by model, platform and time range  
+* Interactive charts and tables for sessions, messages and tools  
+
+### 🛠️ Agent Detail (Dashboard, Sessions, Gateway, Config, Memory, Cron)  
+
+### 📦 Skills Marketplace  
+* Browse, install, update and uninstall skills from the official registry  
+
+### 🧑‍🔧 Maintenance & Administration  
+* Doctor diagnostics, system dump, update, backup/restore, HCI restart  
+* User management (create/edit/delete, role assignment, permission editing)  
+
+### 📁 File Explorer  
+* Scoped, secure, two‑pane editor with syntax highlighting  
+
+### 💻 Terminal  
+* Browser‑based PTY via `node‑pty` + `xterm.js`  
+
+### 🔔 Notifications  
+* Real‑time alerts with persistent storage  
+
+### 🎨 Theme  
+* Dark (default) and Light modes, persisted in `localStorage`  
+
+---  
+
+## Installation  
+
+### Prerequisites  
+
+| Requirement | Minimum | Recommended |
+|---|---|---|
+| Node.js | v20+ | v22 LTS |
+| RAM | 512 MiB | 1 GiB+ |
+| Disk | 200 MiB | 500 MiB+ |
+| OS | Linux / macOS / WSL2 | Ubuntu 22.04 LTS |
+| Hermes Agent | v0.3.x | latest |
+| Build tools | `python3`, `make`, `g++` | required for `node‑pty` native module |
+
+### Manual Installation (Recommended)  
 
 ```bash
+# 1. Clone the repository
 git clone https://github.com/xaspx/hermes-control-interface.git
 cd hermes-control-interface
-cp .env.example .env     # set HERMES_CONTROL_PASSWORD + HERMES_CONTROL_SECRET
-npm install && npm run build
-node server.js            # → http://localhost:10274
-```
 
-See [docs/INSTALL.md](docs/INSTALL.md) for production setup, nginx, and systemd.
-
----
-
-## Overview
-
-| Page | What |
-|------|------|
-| **Home** | System health, agent overview, gateway status, token usage |
-| **Chat** | Real-time streaming, tool call cards, multi-profile |
-| **Workspace** | Browse, edit files and chat with Hermes scoped to a project directory |
-| **Agents** | Profile CRUD, gateway lifecycle, per-agent dashboard/sessions/cron |
-| **Office** | 3-panel swarm monitor — agent health, kanban pipeline, live feed |
-| **Monitor** | Gateway logs, CPU/RAM metrics, live process view |
-| **Usage** | Token analytics, daily trends, cost projections, budget alerts |
-| **Logs** | Agent, error, and gateway logs with level filter |
-| **Skills** | Browse, install, and remove Hermes skills |
-| **Files** | Browse and edit files on the server |
-| **MCP** | MCP server control plane — start, stop, restart, log tail, config editor |
-| **Maintenance** | Backup, restore, HCI update, system doctor |
-
----
-
-## Screenshots
-
-### Core Pages · Dark Mode
-
-| | | |
-|-|-|-|
-| Home | Chat | Office |
-| ![Home](docs/screenshots/dark/01-home.png) | ![Chat](docs/screenshots/dark/chat.png) | ![Office](docs/screenshots/dark/office.png) |
-| Agents | MCP Manager | Usage |
-| ![Agents](docs/screenshots/dark/02-agents.png) | ![MCP](docs/screenshots/dark/mcp.png) | ![Usage](docs/screenshots/dark/03-usage.png) |
-
-### Agent Detail Pages
-
-| | | |
-|-|-|-|
-| Dashboard | Sessions | Gateway |
-| ![Dashboard](docs/screenshots/dark/07-agent-dashboard.png) | ![Sessions](docs/screenshots/dark/08-agent-sessions.png) | ![Gateway](docs/screenshots/dark/09-agent-gateway.png) |
-| Config | Memory | Skills |
-| ![Config](docs/screenshots/dark/10-agent-config.png) | ![Memory](docs/screenshots/dark/11-agent-memory.png) | ![Skills](docs/screenshots/dark/12-agent-skills.png) |
-
----
-
-## Features
-
-### Office v3 — ZOO Swarm Monitor
-
-Three-panel dashboard with zero-subprocess agent states (~100ms vs 3000ms):
-
-- **Agents Panel** — health grid via config.yaml + kanban.db
-- **Kanban Panel** — 8 status lanes (triage→done), dependency arrows, board switcher
-- **Live Feed** — 50 events from gateway logs, agent filter dropdown, keyword search
-- **Task Popup** — expandable run history, workspace file browser, event enrichment, timeline, load-more
-
-### Chat
-
-- Real-time streaming via WebSocket gateway API
-- Multi-profile support with profile switcher
-- Tool call cards with collapsible JSON viewer
-- Stop button, session resume, fork from message
-
-### MCP Manager
-
-Full operational control plane — list, start, stop, restart MCP servers. Live log tail and config editor from the browser. 11 REST API routes.
-
-### Security
-
-- CSP without `unsafe-eval`, CSRF on all mutating endpoints
-- Rate limiting (global + chat), WebSocket RBAC
-- Path traversal prevention, XSS protection
-- 20 permissions across 3 roles (admin, viewer, custom)
-- **Profile-based access isolation** — restrict users to specific agent profiles
-
-### Profile-Based Access Control
-
-Multi-agent teams can restrict which profiles (agents) each user can see and manage:
-
-```javascript
-// User creation with profile restriction
-createUser('cx-team', 'password', 'custom', ['jorah']);     // only sees Jorah
-createUser('influencer-team', 'password', 'custom', ['varys']); // only sees Varys  
-createUser('admin', 'password', 'admin', ['*']);             // sees all agents
-```
-
-- `allowed_profiles` field on each user (`["*"]` = full access, `["jorah", "varys"]` = specific agents)
-- Filters `/api/profiles`, `/api/office/agent-states`, and all `:profile` endpoints
-- `requireProfileAccess` middleware on gateway, config, and keys routes
-- Profile selection UI in the Create User form (checkboxes for available agents)
-- Nav tabs hidden based on user permissions (Files, Maintenance = admin only)
-
-### PWA
-
-Installable to homescreen. Service worker with offline caching. Auto-update on new version.
-
----
-
-## Architecture
-
-```
-Browser (11 pages, SPA)
-       │
-   HTTPS :10274
-       │
-   Express Server (server.js — monolithic, ~6K+ lines)
-       ├── Auth (bcrypt, sessions, CSRF)
-       ├── RBAC (20 permissions, 3 roles)
-       ├── REST API (30+ routes)
-       ├── WebSocket (real-time)
-       │
-       ├── Hermes CLI (agent states, gateway control)
-       ├── SQLite (kanban.db — task pipeline)
-       ├── Filesystem (config.yaml, logs, skills)
-       └── External (MCP servers, token pricing)
-```
-
-Full architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-
----
-
-## API
-
-| Endpoint | Auth | Description |
-|----------|------|-------------|
-| `GET /api/office/kanban?board=` | Login | Kanban board with tasks + links |
-| `GET /api/office/kanban/:id?board=` | Login | Task detail with runs, events, comments |
-| `GET /api/office/kanban/:id/workspace-file?board=&path=` | Login | Read workspace files (code, logs) |
-| `POST /api/office/kanban/:id/action?board=` | Login+CSRF | Quick actions (done, start, reopen, etc.) |
-| `GET /api/office/agent-states` | Login | Agent health grid |
-| `GET /api/office/events` | Admin | Live feed from gateway logs |
-| `GET /api/office/summary?board=` | Login | Board stats + recommendations |
-
-Full API: [docs/API.md](docs/API.md)
-
----
-
-## Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HERMES_CONTROL_PASSWORD` | — | Login password (bcrypt hashed) |
-| `HERMES_CONTROL_SECRET` | — | Session secret (random string) |
-| `PORT` | `10274` | Server port |
-| `HERMES_CONTROL_HOME` | `~/.hermes` | Hermes state directory |
-| `HERMES_PROJECTS_ROOT` | parent of repo | Projects directory |
-
-Full config: [docs/CONFIG.md](docs/CONFIG.md)
-
----
-
-## Requirements
-
-- Node.js 20+
-- Hermes Agent installed on the same machine
-- `hermes` CLI available on PATH
-
----
-
-## Updating
-
-```bash
-git pull upstream main
+# 2. Install Node dependencies
 npm install
+
+# 3. Prepare environment variables
+cp .env.example .env
+# Edit .env:
+#   HERMES_CONTROL_PASSWORD=your‑secure‑password
+#   HERMES_CONTROL_SECRET=$(openssl rand -hex 32)
+
+# 4. Build the frontend assets
 npm run build
-# Restart your HCI service (adjust service name):
-systemctl restart hci-staging
+
+# 5. Start the server
+npm start
 ```
 
-See [docs/DEPLOY.md](docs/DEPLOY.md) for zero-downtime deploys.
+The dashboard will be reachable at `http://localhost:10272` (default `PORT`).
 
----
-
-## Documentation
-
-| Doc | Content |
-|-----|---------|
-| [INSTALL.md](docs/INSTALL.md) | Full setup — nginx, systemd, Cloudflare |
-| [CONFIG.md](docs/CONFIG.md) | All environment variables |
-| [API.md](docs/API.md) | REST API reference |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions, data flow |
-| [SECURITY.md](docs/SECURITY.md) | CSP, CSRF, auth, hardening |
-| [DEPLOY.md](docs/DEPLOY.md) | Production deployment patterns |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and fixes |
-
----
-
-Built for the [Hermes Agent](https://github.com/NousResearch/hermes-agent) ecosystem.  
-[GitHub](https://github.com/xaspx/hermes-control-interface)
-
----
-
-## ❓ Frequently Asked Questions
-
-### General
-
-**Q: What is Hermes Control Interface (HCI)?**
-
-HCI is a **self-hosted web dashboard** for the Hermes AI agent stack. Manage agents, chat, terminals, files, cron, token analytics, MCP servers, and swarm pipelines — all behind a password gate.
-
-**Q: What can I manage with HCI?**
-
-| Page | Capabilities |
-|---|---|---|
-| **Home** | System health, agent overview, gateway status, token usage |
-| **Chat** | Real-time streaming, tool call cards, multi-profile |
-| **Workspace** | Browse, edit files and chat with Hermes scoped to a project directory |
-| **Agents** | Profile CRUD, gateway lifecycle, dashboard/sessions/cron |
-| **Office** | 3-panel swarm monitor — agent health, kanban, live feed |
-| **Monitor** | Gateway logs, CPU/RAM metrics, live process view |
-| **Usage** | Token analytics, daily trends, cost projections, alerts |
-| **Logs** | Agent/error/gateway logs with level filter |
-| **Skills** | Browse, install, remove Hermes skills |
-| **Files** | Browse and edit server files |
-| **MCP** | Start, stop, restart MCP servers, log tail, config editor |
-| **Maintenance** | Backup, restore, HCI update, system doctor |
-
-### Features
-
-**Q: What is Office v3 — ZOO Swarm Monitor?**
-
-Three-panel dashboard with **zero-subprocess agent states** (~100ms vs 3000ms):
-
-- **Agents Panel** — health grid via config.yaml + kanban.db
-- **Kanban Panel** — 8 status lanes (triage→done), dependency arrows
-- **Live Feed** — 50 events from gateway logs, agent filter, keyword search
-- **Task Popup** — run history, workspace file browser, event enrichment
-
-**Q: What chat features are available?**
-
-| Feature | Description |
-|---|---|
-| **Real-time streaming** | WebSocket gateway API |
-| **Multi-profile** | Profile switcher for different agents |
-| **Tool call cards** | Collapsible JSON viewer |
-| **Stop button** | Pause streaming mid-conversation |
-| **Session resume** | Continue previous conversation |
-| **Fork from message** | Branch conversation from any point |
-
-**Q: What is MCP Manager?**
-
-Full operational control plane for MCP servers:
-- List, start, stop, restart servers
-- Live log tail from browser
-- Config editor (JSON/YAML)
-- 11 REST API routes
-
-### Installation
-
-**Q: How do I install HCI?**
+### Production with systemd  
 
 ```bash
-git clone https://github.com/xaspx/hermes-control-interface.git
-cd hermes-control-interface
-cp .env.example .env     # set HERMES_CONTROL_PASSWORD + HERMES_CONTROL_SECRET
-npm install && npm run build
-node server.js            # → http://localhost:10274
+# Use the helper script (creates a systemd unit)
+bash scripts/setup-gateway-service.sh
 ```
 
-See [docs/INSTALL.md](docs/INSTALL.md) for full setup.
+Or create a unit manually:
 
-**Q: What are the requirements?**
+```ini
+# /etc/systemd/system/hermes-control.service
+[Unit]
+Description=Hermes Control Interface
+After=network.target
 
-- Node.js 20+
-- Hermes Agent installed on same machine
-- `hermes` CLI available on PATH
+[Service]
+Type=simple
+User=hermes          # non‑root preferred
+WorkingDirectory=/path/to/hermes-control-interface
+ExecStart=/usr/bin/node server.js
+Restart=always
+Environment=NODE_ENV=production
 
-**Q: How do I update HCI?**
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-git pull upstream main
-npm install
-npm run build
-# Restart your HCI service (adjust service name):
-systemctl restart hci-staging
+sudo systemctl enable hermes-control
+sudo systemctl start hermes-control
 ```
 
-### Tech Stack
+---  
 
-**Q: What technologies does HCI use?**
+## Usage  
 
-| Layer | Technology |
-|---|---|
-| **Frontend** | Vanilla JS + Vite |
-| **Backend** | Node.js + Express + WebSocket |
-| **Terminal** | xterm.js |
-| **Charts** | Chart.js |
-| **Database** | better-sqlite3 |
-| **Version** | 3.6.1 |
+1. Open the UI in a browser (`http://HOST:PORT`).  
+2. Log in with the password defined in `.env`.  
+3. Navigate through the top‑level pages: **Home**, **Agents**, **Chat**, **Usage**, **Skills**, **Logs**, **Monitor**, **Files**, **Maintenance**, **Office**.  
+4. Use the **Users** tab (Administration → Users) to add additional accounts and assign roles.  
+5. For each Hermes profile you can start/stop the gateway, edit its configuration, view logs and manage scheduled cron jobs.  
+6. The **Chat** page streams responses instantly; use the stop button to abort a running stream.  
+7. The **Usage** page offers token analytics; select a time range and/or specific agent to filter.  
+8. The **File Explorer** lets you edit files under `~/.hermes` (or any roots defined via `HERMES_CONTROL_ROOTS`).  
 
-### Security
+All actions are logged in the **Audit** view for traceability.
 
-**Q: What security features are included?**
+---  
 
-| Feature | Implementation |
-|---|---|
-| **CSP** | No `unsafe-eval` |
-| **CSRF** | All mutating endpoints |
-| **Rate limiting** | Global + chat |
-| **WebSocket RBAC** | Role-based access |
-| **Path traversal** | Prevention |
-| **XSS** | Protection |
-| **Permissions** | 20 across 3 roles (admin, viewer, custom) |
+## Testing  
 
-### PWA
+```bash
+npm test          # Unit tests (node --test, test/*.test.js)
+npm run test:e2e  # Playwright E2E (test/office-visualization.spec.js) — needs a first-run server on :8790 (credentials in test/global-setup.js)
+npm run test:qa   # Playwright route QA (qa/) — set QA_BASE_URL to a running instance
+```  
 
-**Q: Can I install HCI as a PWA?**
+---  
 
-Yes!
-- Installable to homescreen
-- Service worker with offline caching
-- Auto-update on new version
-
-### Configuration
-
-**Q: What environment variables are required?**
-
-| Variable | Default | Description |
-|---|---|---|
-| `HERMES_CONTROL_PASSWORD` | — | Login password (bcrypt) |
-| `HERMES_CONTROL_SECRET` | — | Session secret |
-| `PORT` | `10274` | Server port |
-| `HERMES_CONTROL_HOME` | `~/.hermes` | Hermes state directory |
-| `HERMES_PROJECTS_ROOT` | parent of repo | Projects directory |
-
-See [docs/CONFIG.md](docs/CONFIG.md) for full list.
-
-### API
-
-**Q: What REST API endpoints are available?**
-
-| Endpoint | Auth | Description |
-|---|---|---|
-| `GET /api/office/kanban?board=` | Login | Kanban board |
-| `GET /api/office/kanban/:id?board=` | Login | Task detail |
-| `GET /api/office/kanban/:id/workspace-file` | Login | Read workspace files |
-| `POST /api/office/kanban/:id/action` | Login+CSRF | Quick actions |
-| `GET /api/office/agent-states` | Login | Agent health grid |
-| `GET /api/office/events` | Admin | Live feed |
-| `GET /api/office/summary?board=` | Login | Board stats |
-
-See [docs/API.md](docs/API.md) for full reference.
-
-### Architecture
-
-**Q: What is the HCI architecture?**
+## Project Structure  
 
 ```
-Browser (11 pages, SPA)
-       │
-   HTTPS :10274
-       │
-   Express Server (server.js — monolithic, ~6K+ lines)
-       ├── Auth (bcrypt, sessions, CSRF)
-       ├── RBAC (20 permissions, 3 roles)
-       ├── REST API (30+ routes)
-       ├── WebSocket (real-time)
-       │
-       ├── Hermes CLI (agent states, gateway control)
-       ├── SQLite (kanban.db — task pipeline)
-       ├── Filesystem (config.yaml, logs, skills)
-       └── External (MCP servers, token pricing)
+.
+├── AGENTS.md
+├── auth.js                 # Multi‑user auth & RBAC logic
+├── CLAUDE.md
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
+├── dist/                   # Production assets built by Vite
+│   ├── assets/
+│   │   ├── favicon-Bkag5KeL.svg
+│   │   ├── hermes-agent-bg-DhFabiO9.jpg
+│   │   ├── hermes-icon-BhPDiZ8G.svg
+│   │   ├── index-C33hUJXJ.css
+│   │   └── index-DXC1lv8V.js
+│   ├── i18n/
+│   │   ├── en.json
+│   │   └── ja.json
+│   └── index.html
+├── docs/
+│   ├── API.md
+│   ├── CONFIG.md
+│   ├── DEPLOY.md
+│   ├── DESIGN.md
+│   ├── INSTALL.md
+│   ├── PASSWORD.md
+│   ├── SECURITY.md
+│   ├── TROUBLESHOOTING.md
+│   ├── TUI_CHAT_REVAMP_PLAN.md
+│   ├── SECURITY_AUDIT.md
+│   └── plans/
+│       ├── 2026-04-19-gateway-health-check.md
+│       ├── 2026-04-19-granular-update-system.md
+│       └── 2026-05-06-ux-fixes.md
+│   └── screenshots/
+│       ├── dark/   (01‑13 PNG files)
+│       └── light/  (01‑03 PNG files)
+├── hci.config.yaml.example
+├── lib/                    # Shared utility libraries
+├── LICENSE
+├── node_modules/
+├── package-lock.json
+├── package.json
+├── playwright.config.js
+├── playwright.config.mts
+├── qa/                     # QA helpers & test data
+├── README.md               # <<‑‑ This file
+├── scripts/                # Helper scripts (setup, lint, etc.)
+├── SECURITY_AUDIT.md
+├── server.js               # Express + WebSocket + PTY server
+├── src/                    # Vite source code (frontend)
+│   ├── assets/
+│   ├── css/
+│   ├── js/
+│   └── index.html
+├── test/
+├── test-results/
+├── vite.config.js
+└── (additional directories)
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
+*Key directories*  
 
-### Documentation
+* `src/` – Front‑end source (ES modules, CSS, assets).  
+* `dist/` – Bundled static files served by Express in production.  
+* `server.js` – Backend API, WebSocket handling, PTY terminal, authentication.  
+* `auth.js` – RBAC implementation and password handling.  
+* `docs/` – Comprehensive documentation (API, configuration, deployment, security).  
 
-**Q: Where can I find more documentation?**
+---  
 
-| Doc | Content |
-|---|---|
-| [INSTALL.md](docs/INSTALL.md) | nginx, systemd, Cloudflare |
-| [CONFIG.md](docs/CONFIG.md) | All environment variables |
-| [API.md](docs/API.md) | REST API reference |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions, data flow |
-| [SECURITY.md](docs/SECURITY.md) | CSP, CSRF, auth, hardening |
-| [DEPLOY.md](docs/DEPLOY.md) | Zero-downtime deploys |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and fixes |
+## License  
 
-### Community & Support
-
-|| Resource | Link |
-|---|---|---|
-|| **GitHub Issues** | [github.com/xaspx/hermes-control-interface/issues](https://github.com/xaspx/hermes-control-interface/issues) |
-|| **GitHub** | [xaspx/hermes-control-interface](https://github.com/xaspx/hermes-control-interface) |
-|| **Hermes Agent** | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) |
-
-### License
-
-**Q: Is Hermes Control Interface free and open source?**
-
-Yes! **MIT License** - see [LICENSE](LICENSE). Self-host for free, manage your Hermes agent stack with a beautiful web UI.
+This project is licensed under the MIT License – see the `LICENSE` file for details.  
